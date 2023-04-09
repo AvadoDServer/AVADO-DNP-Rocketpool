@@ -19,7 +19,6 @@ import { DappManagerHelper } from "./DappManagerHelper";
 import SmoothingPoolBanner from "./SmoothingPoolBanner";
 import { minipoolStatusType, nodeFeeType, nodeStatusType, nodeSyncProgressResponseType, rplPriceDataType, walletStatusType } from "./Types";
 import { KeyManagerHelper } from "./KeyManagerHelper";
-import JSONbig from "json-bigint";
 
 export const packageName = "rocketpool.avado.dnp.dappnode.eth";
 
@@ -107,8 +106,10 @@ const Comp = () => {
 
     const rpdDaemon = async (command: string, callback: (data: any) => void, error?: (error: any) => void) => {
         await axios.post(`${config.api.HTTP}/rpd`, { command: command }, { timeout: 5 * 60 * 1000 }).then((res) => {
-            const data = JSONbig.parse(res.data);
-            console.log(`rocketpoold api ${command}: ` + res.data);
+            // put quotes about bigNumbers to avoid parsing issues
+            var json = res.data.replace(/([\[:])?(\d{9,})([,\}\]])/g, "$1\"$2\"$3");
+            console.log(`rocketpoold api ${command}: ` + json);
+            const data = JSON.parse(res.data);
             callback(data);
         }).catch(e => { if (error) error(e) })
     }
