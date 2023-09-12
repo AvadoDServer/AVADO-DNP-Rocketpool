@@ -1,7 +1,7 @@
 import React from "react";
 import { DappManagerHelper } from "./DappManagerHelper";
 import { RestApi } from "./RestApi";
-import { networkType, consusClientType, minipoolStatusType, nodeStatusType } from "./Types"
+import { networkType, consensusClientType as consensusClientType, minipoolStatusType, nodeStatusType, consensusClients } from "./Types"
 import { KeyManagerHelper } from "./KeyManagerHelper";
 import { confirmAlert } from 'react-confirm-alert';
 
@@ -18,14 +18,14 @@ const ValidatorBanner = ({ dappManagerHelper, minipoolStatus, setKeyManagerHelpe
 
     const [packages, setPackages] = React.useState<string[]>();
     const [network, setNetwork] = React.useState<networkType>();
-    const [consensusClient, setConsensusClient] = React.useState<consusClientType>();
+    const [consensusClient, setConsensusClient] = React.useState<consensusClientType>();
 
     React.useEffect(() => {
         if (dappManagerHelper) {
             dappManagerHelper?.getEnvs().then(
                 (envs) => {
                     setNetwork(envs["NETWORK" as keyof typeof envs] as networkType ?? "mainnet");
-                    setConsensusClient(envs["CONSENSUSCLIENT" as keyof typeof envs] as consusClientType ?? "prysm");
+                    setConsensusClient(envs["CONSENSUSCLIENT" as keyof typeof envs] as consensusClientType ?? "prysm");
                 }
             )
             dappManagerHelper.getPackages().then(
@@ -41,19 +41,24 @@ const ValidatorBanner = ({ dappManagerHelper, minipoolStatus, setKeyManagerHelpe
             const packageNames = {
                 "prater": {
                     "teku": "teku-prater.avado.dnp.dappnode.eth",
+                    "nimbus": "nimbus-prater.avado.dnp.dappnode.eth",
                     "prysm": "eth2validator-prater.avado.dnp.dappnode.eth"
                 },
                 "mainnet": {
                     "teku": "teku.avado.dnp.dappnode.eth",
+                    "nimbus": "nimbus.avado.dnp.dappnode.eth",
                     "prysm": "eth2validator.avado.dnp.dappnode.eth"
                 },
             }
 
             const validatorPackage = packageNames[network][consensusClient]
 
+            const supportedPackages = consensusClients.map(n => packageNames[network][n])
 
-            if (packages.includes(packageNames[network]["teku"]) && packages.includes(packageNames[network]["prysm"])) {
-                setMessage("You have both Teku and Prysm installed. Make sure you do NOT add your keys to both, or you will get slashed.")
+            const installedConsensusClients = packages.filter(name => supportedPackages.includes(name))
+
+            if (installedConsensusClients.length > 1) {
+                setMessage("You have multiple consensus clients installed. Make sure you do NOT add your keys to more than one client, or you will get slashed.")
             }
 
             if (!packages.includes(validatorPackage)) {
