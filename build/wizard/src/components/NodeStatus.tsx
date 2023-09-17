@@ -2,7 +2,7 @@ import React from "react";
 import SyncStatusTag from "./SyncStatusTag";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faRocket } from "@fortawesome/free-solid-svg-icons";
-import { networkType, consusClientType, minipoolStatusType, nodeStatusType } from "./Types"
+import { nodeStatusType } from "./Types"
 import WithdrawRpl from "./WithdrawRpl";
 
 

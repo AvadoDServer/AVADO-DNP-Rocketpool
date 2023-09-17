@@ -60,6 +60,7 @@ const Welcome = ({ utils, nodeSyncStatus, setNavBar, rplPriceData }: Props) => {
     const eth2BC = Object.keys(packages).find((k) => {
         return ((
             packages[k].name === "prysm-beacon-chain-mainnet.avado.dnp.dappnode.eth") ||
+            packages[k].name === "nimbus.avado.dnp.dappnode.eth" ||
             packages[k].name === "teku.avado.dnp.dappnode.eth"
         )
     });
@@ -69,6 +70,7 @@ const Welcome = ({ utils, nodeSyncStatus, setNavBar, rplPriceData }: Props) => {
                 description: "An ETH2.0 beacon chain",
                 suggestedpackages: [
                     store.packages.find((p: any) => { return p.manifest.name === "teku.avado.dnp.dappnode.eth" }),
+                    store.packages.find((p: any) => { return p.manifest.name === "nimbus.avado.dnp.dappnode.eth" }),
                     store.packages.find((p: any) => { return p.manifest.name === "prysm-beacon-chain-mainnet.avado.dnp.dappnode.eth" })
                 ]
             }
@@ -96,6 +98,7 @@ const Welcome = ({ utils, nodeSyncStatus, setNavBar, rplPriceData }: Props) => {
                 description: "An ETH2.0 validator client",
                 suggestedpackages: [
                     store.packages.find((p: any) => { return p.manifest.name === "teku.avado.dnp.dappnode.eth" }),
+                    store.packages.find((p: any) => { return p.manifest.name === "nimbus.avado.dnp.dappnode.eth" }),
                     store.packages.find((p: any) => { return p.manifest.name === "prysm-beacon-chain-mainnet.avado.dnp.dappnode.eth" })
                 ]
             }
