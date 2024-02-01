@@ -2,7 +2,7 @@
 
 # Check NETWORK value
 case ${NETWORK} in
-"mainnet" | "prater") ;;
+"mainnet" | "prater" | "holesky") ;;
 *)
     echo "Invalid NETWORK configured"
     exit 1

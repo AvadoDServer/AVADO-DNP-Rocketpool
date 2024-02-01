@@ -232,5 +232,5 @@ server.post('/restore-backup', (req, res, next) => {
 
 server.listen(9999, function () {
     console.log("%s listening at %s", server.name, server.url);
-    console.assert(network == "prater" || network == "mainnet", 'Wrongly configured NETWORK environment variable! Use either "prater" or "mainnet"');
+    console.assert(network == "prater" || network == "holesky" || network == "mainnet", 'Wrongly configured NETWORK environment variable! Use either "prater" or "mainnet"');
 });

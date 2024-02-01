@@ -4,7 +4,7 @@ FROM node:16.15.0 as builder
 WORKDIR /usr/src/app/wizard
 COPY wizard .
 RUN yarn
-RUN rm -Rf build && yarn run build
+RUN rm -Rf build && yarn build --production
 
 # Monitor
 WORKDIR /usr/src/monitor

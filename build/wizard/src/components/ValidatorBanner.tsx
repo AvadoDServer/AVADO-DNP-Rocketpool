@@ -1,7 +1,7 @@
 import React from "react";
 import { DappManagerHelper } from "./DappManagerHelper";
 import { RestApi } from "./RestApi";
-import { networkType, consensusClientType as consensusClientType, minipoolStatusType, nodeStatusType, consensusClients } from "./Types"
+import { networkType, consensusClientType, minipoolStatusType, nodeStatusType, consensusClients } from "./Types"
 import { KeyManagerHelper } from "./KeyManagerHelper";
 import { confirmAlert } from 'react-confirm-alert';
 
@@ -45,7 +45,7 @@ const ValidatorBanner = ({ dappManagerHelper, minipoolStatus, setKeyManagerHelpe
                     "lighthouse": "lighthouse-prater.avado.dnp.dappnode.eth",
                     "prysm": "eth2validator-prater.avado.dnp.dappnode.eth"
                 },
-                "holeksy": {
+                "holesky": {
                     "teku": "teku-holesky.avado.dnp.dappnode.eth",
                     "nimbus": "nimbus-holesky.avado.dnp.dappnode.eth",
                     "lighthouse": "lighthouse-holesky.avado.dnp.dappnode.eth",

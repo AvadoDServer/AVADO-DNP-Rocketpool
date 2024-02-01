@@ -1,5 +1,5 @@
 
-export type networkType = "prater" | "mainnet"
+export type networkType = "prater" | "holesky" | "mainnet"
 
 export const consensusClients = ["teku", "prysm", "nimbus", "lighthouse"] as const;
 export type consensusClientType = typeof consensusClients[number];

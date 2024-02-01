@@ -1,12 +1,8 @@
 import React from "react";
-import { confirmAlert } from 'react-confirm-alert';
 import 'react-confirm-alert/src/react-confirm-alert.css';
 import Spinner from "./Spinner";
 import web3 from "web3";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faCheck } from "@fortawesome/free-solid-svg-icons";
-import DownloadBackup from "./DownloadBackup";
-import { rplPriceDataType, nodeStatusType, nodeFeeType, minipoolStatusType, MinipoolDetailsType } from "./Types"
+import { minipoolStatusType, MinipoolDetailsType } from "./Types"
 
 interface Props {
     minipool: MinipoolDetailsType
