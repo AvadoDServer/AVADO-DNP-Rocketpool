@@ -1,7 +1,7 @@
 
 export type networkType = "prater" | "mainnet"
 
-export const consensusClients = ["teku", "prysm", "nimbus"] as const;
+export const consensusClients = ["teku", "prysm", "nimbus", "lighthouse"] as const;
 export type consensusClientType = typeof consensusClients[number];
 
 // https://github.com/rocket-pool/smartnode/blob/master/shared/types/api/minipool.go

@@ -42,11 +42,19 @@ const ValidatorBanner = ({ dappManagerHelper, minipoolStatus, setKeyManagerHelpe
                 "prater": {
                     "teku": "teku-prater.avado.dnp.dappnode.eth",
                     "nimbus": "nimbus-prater.avado.dnp.dappnode.eth",
+                    "lighthouse": "lighthouse-prater.avado.dnp.dappnode.eth",
                     "prysm": "eth2validator-prater.avado.dnp.dappnode.eth"
+                },
+                "holeksy": {
+                    "teku": "teku-holesky.avado.dnp.dappnode.eth",
+                    "nimbus": "nimbus-holesky.avado.dnp.dappnode.eth",
+                    "lighthouse": "lighthouse-holesky.avado.dnp.dappnode.eth",
+                    "prysm": "eth2validator-holesky.avado.dnp.dappnode.eth"
                 },
                 "mainnet": {
                     "teku": "teku.avado.dnp.dappnode.eth",
                     "nimbus": "nimbus.avado.dnp.dappnode.eth",
+                    "lighthouse": "lighthouse.avado.dnp.dappnode.eth",
                     "prysm": "eth2validator.avado.dnp.dappnode.eth"
                 },
             }
