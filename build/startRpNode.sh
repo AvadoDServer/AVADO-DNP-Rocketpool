@@ -57,7 +57,7 @@ elif [ "${CONSENSUSCLIENT}" = "nimbus" ]; then
     BCJSONRPCURL=""
 elif [ "${CONSENSUSCLIENT}" = "lighthouse" ]; then
     if [ "${NETWORK}" = "prater" ] || [ "${NETWORK}" = "holesky" ]; then
-        BCHTTPURL="http://lighthouse--${NETWORK}.my.ava.do:5052"
+        BCHTTPURL="http://lighthouse-${NETWORK}.my.ava.do:5052"
     else
         BCHTTPURL="http://lighthouse.my.ava.do:5052"
     fi
