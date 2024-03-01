@@ -32,12 +32,17 @@ if [ "${EXECUTIONCLIENT}" = "nethermind" ]; then
     ECHTTPURL="http://avado-dnp-nethermind.my.ava.do:8545"
     ECWSURL="ws://avado-dnp-nethermind.my.ava.do:8545"
 else
-    if [ "${NETWORK}" = "prater" ] || [ "${NETWORK}" = "holesky" ]; then
-        ECHTTPURL="http://${NETWORK}-geth.my.ava.do:8545"
-        ECWSURL="ws://${NETWORK}-geth.my.ava.do:8546"
-    else
-        ECHTTPURL="http://ethchain-geth.my.ava.do:8545"
-        ECWSURL="http://ethchain-geth.my.ava.do:8546"
+    if [ "${EXECUTIONCLIENT}" = "reth" ]; then
+        ECHTTPURL="http://reth-holesky.my.ava.do:8545"
+        ECWSURL="ws://reth-holesky.my.ava.do:8545"
+    else #geth
+        if [ "${NETWORK}" = "prater" ] || [ "${NETWORK}" = "holesky" ]; then
+            ECHTTPURL="http://${NETWORK}-geth.my.ava.do:8545"
+            ECWSURL="ws://${NETWORK}-geth.my.ava.do:8546"
+        else
+            ECHTTPURL="http://ethchain-geth.my.ava.do:8545"
+            ECWSURL="http://ethchain-geth.my.ava.do:8546"
+        fi
     fi
 fi
 
