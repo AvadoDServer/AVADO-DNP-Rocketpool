@@ -20,7 +20,7 @@ esac
 
 # Check EXECUTIONCLIENT value
 case ${EXECUTIONCLIENT} in
-"geth" | "nethermind") ;;
+"reth" | "geth" | "nethermind") ;;
 *)
     echo "Invalid EXECUTIONCLIENT configured"
     exit 1
@@ -33,8 +33,8 @@ if [ "${EXECUTIONCLIENT}" = "nethermind" ]; then
     ECWSURL="ws://avado-dnp-nethermind.my.ava.do:8545"
 else
     if [ "${EXECUTIONCLIENT}" = "reth" ]; then
-        ECHTTPURL="http://reth-holesky.my.ava.do:8545"
-        ECWSURL="ws://reth-holesky.my.ava.do:8545"
+        ECHTTPURL="http://reth-${NETWORK}.my.ava.do:8545"
+        ECWSURL="ws://reth-${NETWORK}.my.ava.do:8546"
     else #geth
         if [ "${NETWORK}" = "prater" ] || [ "${NETWORK}" = "holesky" ]; then
             ECHTTPURL="http://${NETWORK}-geth.my.ava.do:8545"
@@ -81,6 +81,19 @@ NETWORK="${NETWORK}" \
     BCHTTPURL="${BCHTTPURL}" \
     BCJSONRPCURL="${BCJSONRPCURL}" \
     envsubst <"$(dirname "$0")/user-settings.template" >"$(dirname "$0")/user-settings.yml"
+
+# Export variables and substitute them in the template
+NETWORK="${NETWORK}" \
+    CONSENSUSCLIENT="${CONSENSUSCLIENT}" \
+    ECHTTPURL="${ECHTTPURL}" \
+    ECWSURL="${ECWSURL}" \
+    BCHTTPURL="${BCHTTPURL}" \
+    BCJSONRPCURL="${BCJSONRPCURL}" \
+    EXECUTIONCLIENT="${EXECUTIONCLIENT}" \
+    CONSENSUSCLIENT="${CONSENSUSCLIENT}" \
+    envsubst <"$(dirname "$0")/settings.template" >"$(dirname "$0")/settings.json"
+
+cat "$(dirname "$0")/settings.json"
 
 # Create folder for rewards trees
 mkdir -p /rocketpool/data/rewards-trees/

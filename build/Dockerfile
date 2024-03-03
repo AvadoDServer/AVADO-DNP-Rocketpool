@@ -42,6 +42,7 @@ COPY restart-validator.sh /srv/rocketpool
 RUN chmod a+x /srv/rocketpool/startRpNode.sh /srv/rocketpool/restart-validator.sh
 RUN ln -sf /srv/rocketpool/restart-validator.sh /srv/rocketpool/stop-validator.sh
 COPY user-settings.template /srv/rocketpool
+COPY settings.template /srv/rocketpool
 
 COPY supervisord.conf /etc/supervisord.conf
 COPY nginx.conf /etc/nginx/

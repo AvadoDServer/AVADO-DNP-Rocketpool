@@ -5,9 +5,13 @@ class Utils {
     network: "prater" | "holesky" | "mainnet";
     beaconChainBaseUrl: string;
     etherscanBaseUrl: string;
+    ecwsurl: string;
 
-    constructor(network: "prater" | "mainnet" | "holesky") {
-        this.network = network;
+    constructor(settings: any) {
+        this.network = settings.network;
+
+        this.ecwsurl = settings.ecwsurl;
+
         this.beaconChainBaseUrl = ({
             "prater": "https://prater.beaconcha.in",
             "holesky": "https://holesky.beaconcha.in",
@@ -54,12 +58,9 @@ class Utils {
         return parseFloat(number).toFixed(2) + "%";
     }
 
+    //TODO
     wsProvider() {
-        return ({
-            "prater": 'ws://goerli-geth.my.ava.do:8546',
-            "holesky": 'ws://holesky-geth.my.ava.do:8546',
-            "mainnet": 'ws://ethchain-geth.my.ava.do:8546',
-        })[this.network] || 'ws://ethchain-geth.my.ava.do:8546'
+        return this.ecwsurl;
     }
 }
 

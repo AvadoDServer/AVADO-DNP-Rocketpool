@@ -6,7 +6,7 @@ const NetworkBanner = ({ network }: { network: string | undefined }) => {
             {network === "prater" || network === "holesky" && (
                 <section className="hero is-warning">
                     <div className="hero-body is-small">
-                        <p className="has-text-centered">Using the ${network} Test Network</p>
+                        <p className="has-text-centered">Using the {network} Test Network</p>
                     </div>
                 </section>
             )}

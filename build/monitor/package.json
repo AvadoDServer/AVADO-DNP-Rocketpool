@@ -13,7 +13,6 @@
     "restify": "^8.6.0",
     "restify-cors-middleware2": "^2.1.2",
     "adm-zip": "^0.5.9",
-    "jsonfile": ""
-
+    "jsonfile": "^6"
   }
 }
