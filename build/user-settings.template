@@ -37,7 +37,7 @@ exporter:
   enableRootFs: "false"
 externalExecution:
   httpUrl: ${ECHTTPURL}
-  wsUrl: ${ECHTTPURL}
+  wsUrl: ${ECWSURL}
 externalLighthouse:
   additionalVcFlags: ""
   containerTag: sigp/lighthouse:v2.1.5

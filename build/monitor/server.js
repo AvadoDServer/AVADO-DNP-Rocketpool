@@ -58,7 +58,7 @@ const execute = (cmd) => {
                         return resolve('{"status":"success","error":"","rplPrice":11613106459524954,"rplPriceBlock":6199200,"minPerMinipoolRplStake":137775366614993524895,"maxPerMinipoolRplStake":2066630499224902873416}');
                     case "node sync":
                         return resolve('{ "status": "success", "error": "", "ecStatus": { "primaryEcStatus": { "isWorking": true, "isSynced": true, "syncProgress": 0, "error": "" }, "fallbackEnabled": false, "fallbackEcStatus": { "isWorking": false, "isSynced": false, "syncProgress": 0, "error": "" } }, "eth2Progress": 1, "eth2Synced": true }');
-                        //return resolve('{ "status": "success", "error": "", "ecStatus": { "primaryEcStatus": { "isWorking": true, "isSynced": false, "syncProgress": 0.10967741935483871, "error": "" }, "fallbackEnabled": false, "fallbackEcStatus": { "isWorking": false, "isSynced": false, "syncProgress": 0, "error": "" } }, "eth2Progress": 0.9912876700950112, "eth2Synced": false }')
+                    //return resolve('{ "status": "success", "error": "", "ecStatus": { "primaryEcStatus": { "isWorking": true, "isSynced": false, "syncProgress": 0.10967741935483871, "error": "" }, "fallbackEnabled": false, "fallbackEcStatus": { "isWorking": false, "isSynced": false, "syncProgress": 0, "error": "" } }, "eth2Progress": 0.9912876700950112, "eth2Synced": false }')
                     case "node status":
                         return resolve('{"status":"success","error":"","accountAddress":"0xe28b9c4109a8ee3d70775a15ba219a140b06f22a","withdrawalAddress":"0x9b18e9e9aa3dd35100b385b7035c0b1e44afca14","pendingWithdrawalAddress":"0x0000000000000000000000000000000000000000","registered":true,"trusted":false,"timezoneLocation":"Europe/Brussels","accountBalances":{"eth":493680693977882429,"reth":0,"rpl":1000000000000000000,"fixedSupplyRpl":0},"withdrawalBalances":{"eth":22380804572630665781,"reth":982807350942407963,"rpl":1312981538476790019908,"fixedSupplyRpl":0},"rplStake":199000000000000000000,"effectiveRplStake":199000000000000000000,"minimumRplStake":136538053959214892496,"maximumRplStake":2048070809388223387444,"collateralRatio":0.1457469139405217,"minipoolLimit":1,"minipoolCounts":{"total":1,"initialized":0,"prelaunch":0,"staking":1,"withdrawable":0,"dissolved":0,"refundAvailable":0,"withdrawalAvailable":0,"closeAvailable":0,"finalised":0}}');
                     case "minipool status":
@@ -141,6 +141,15 @@ server.get("/network", (req, res) => {
     res.send(200, network);
 });
 
+server.get("/settings", (req, res) => {
+    try {
+        const settings = jsonfile.readFileSync("/srv/rocketpool/settings.json");
+        res.send(200, settings);
+    } catch (e) {
+        console.error(e)
+    }
+});
+
 //restart Rocket Pool smartnode
 server.get("/restart-rocketpool-node", (req, res) => {
     console.log(`Restart Rocket Pool smartnode`);
@@ -187,7 +196,7 @@ server.post('/restore-backup', (req, res, next) => {
 
             // delete existing data folder (if it exists)
             fs.rmSync("/rocketpool/data", { recursive: true, force: true /* ignore if not exists */ });
-            
+
             // unzip
             const zip = new AdmZip(zipfilePath);
             zip.extractAllTo("/rocketpool/", /*overwrite*/ true);
@@ -224,7 +233,7 @@ server.post('/restore-backup', (req, res, next) => {
     function checkFileExistsInZipFile(zipEntries, expectedPath) {
         const containsFile = zipEntries.some((entry) => entry.entryName == expectedPath);
         if (!containsFile)
-            throw {message:`Invalid backup file. The zip file must contain "${expectedPath}"`}
+            throw { message: `Invalid backup file. The zip file must contain "${expectedPath}"` }
     }
 });
 
@@ -232,5 +241,5 @@ server.post('/restore-backup', (req, res, next) => {
 
 server.listen(9999, function () {
     console.log("%s listening at %s", server.name, server.url);
-    console.assert(network == "prater" || network == "mainnet", 'Wrongly configured NETWORK environment variable! Use either "prater" or "mainnet"');
+    console.assert(network == "prater" || network == "holesky" || network == "mainnet", 'Wrongly configured NETWORK environment variable! Use either "prater" or "mainnet"');
 });

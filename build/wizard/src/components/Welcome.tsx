@@ -61,6 +61,7 @@ const Welcome = ({ utils, nodeSyncStatus, setNavBar, rplPriceData }: Props) => {
         return ((
             packages[k].name === "prysm-beacon-chain-mainnet.avado.dnp.dappnode.eth") ||
             packages[k].name === "nimbus.avado.dnp.dappnode.eth" ||
+            packages[k].name === "lighthouse.avado.dnp.dappnode.eth" ||
             packages[k].name === "teku.avado.dnp.dappnode.eth"
         )
     });
@@ -71,7 +72,8 @@ const Welcome = ({ utils, nodeSyncStatus, setNavBar, rplPriceData }: Props) => {
                 suggestedpackages: [
                     store.packages.find((p: any) => { return p.manifest.name === "teku.avado.dnp.dappnode.eth" }),
                     store.packages.find((p: any) => { return p.manifest.name === "nimbus.avado.dnp.dappnode.eth" }),
-                    store.packages.find((p: any) => { return p.manifest.name === "prysm-beacon-chain-mainnet.avado.dnp.dappnode.eth" })
+                    // store.packages.find((p: any) => { return p.manifest.name === "lighthouse.avado.dnp.dappnode.eth" }),
+                    // store.packages.find((p: any) => { return p.manifest.name === "prysm-beacon-chain-mainnet.avado.dnp.dappnode.eth" })
                 ]
             }
         );

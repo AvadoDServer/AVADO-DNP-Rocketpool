@@ -1,7 +1,7 @@
 
-export type networkType = "prater" | "mainnet"
+export type networkType = "prater" | "holesky" | "mainnet"
 
-export const consensusClients = ["teku", "prysm", "nimbus"] as const;
+export const consensusClients = ["teku", "prysm", "nimbus", "lighthouse"] as const;
 export type consensusClientType = typeof consensusClients[number];
 
 // https://github.com/rocket-pool/smartnode/blob/master/shared/types/api/minipool.go
@@ -164,9 +164,7 @@ export type rplPriceDataType = {
   "rplPrice": string, // bigint,
   "rplPriceBlock": number
   "minPer8EthMinipoolRplStake": string, // bigint,
-  "maxPer8EthMinipoolRplStake": string, // bigint,
   "minPer16EthMinipoolRplStake": string, // bigint,
-  "maxPer16EthMinipoolRplStake": string
 }
 
 // https://github.com/rocket-pool/smartnode/blob/master/shared/types/api/network.go#L9

@@ -73,12 +73,13 @@ const Comp = () => {
     }, [walletStatus, minipoolStatus]);
 
     React.useEffect(() => {
-        axios.get(`${config.api.HTTP}/network`).then((res) => {
-            const network = res.data;
+        axios.get(`${config.api.HTTP}/settings`).then((res) => {
+            const settings = res.data;
+            const network = settings.network;
             setNetwork(network);
             console.log(`Using the ${network} network`);
 
-            const utils = new Utils(network);
+            const utils = new Utils(settings);
             setUtils(utils);
         })
     }, []);

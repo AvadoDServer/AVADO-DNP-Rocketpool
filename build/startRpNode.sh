@@ -2,7 +2,7 @@
 
 # Check NETWORK value
 case ${NETWORK} in
-"mainnet" | "prater") ;;
+"mainnet" | "prater" | "holesky") ;;
 *)
     echo "Invalid NETWORK configured"
     exit 1
@@ -11,7 +11,7 @@ esac
 
 # Check CONSENSUSCLIENT value
 case ${CONSENSUSCLIENT} in
-"teku" | "prysm" | "nimbus") ;;
+"teku" | "prysm" | "nimbus" | "lighthouse") ;;
 *)
     echo "Invalid CONSENSUSCLIENT configured"
     exit 1
@@ -20,7 +20,7 @@ esac
 
 # Check EXECUTIONCLIENT value
 case ${EXECUTIONCLIENT} in
-"geth" | "nethermind") ;;
+"reth" | "geth" | "nethermind") ;;
 *)
     echo "Invalid EXECUTIONCLIENT configured"
     exit 1
@@ -32,27 +32,39 @@ if [ "${EXECUTIONCLIENT}" = "nethermind" ]; then
     ECHTTPURL="http://avado-dnp-nethermind.my.ava.do:8545"
     ECWSURL="ws://avado-dnp-nethermind.my.ava.do:8545"
 else
-    if [ "${NETWORK}" = "prater" ]; then
-        ECHTTPURL="http://goerli-geth.my.ava.do:8545"
-        ECWSURL="ws://goerli-geth.my.ava.do:8546"
-    else
-        ECHTTPURL="http://ethchain-geth.my.ava.do:8545"
-        ECWSURL="http://ethchain-geth.my.ava.do:8546"
+    if [ "${EXECUTIONCLIENT}" = "reth" ]; then
+        ECHTTPURL="http://reth-${NETWORK}.my.ava.do:8545"
+        ECWSURL="ws://reth-${NETWORK}.my.ava.do:8546"
+    else #geth
+        if [ "${NETWORK}" = "prater" ] || [ "${NETWORK}" = "holesky" ]; then
+            ECHTTPURL="http://${NETWORK}-geth.my.ava.do:8545"
+            ECWSURL="ws://${NETWORK}-geth.my.ava.do:8546"
+        else
+            ECHTTPURL="http://ethchain-geth.my.ava.do:8545"
+            ECWSURL="http://ethchain-geth.my.ava.do:8546"
+        fi
     fi
 fi
 
 if [ "${CONSENSUSCLIENT}" = "teku" ]; then
-    if [ "${NETWORK}" = "prater" ]; then
-        BCHTTPURL="http://teku-prater.my.ava.do:5051"
+    if [ "${NETWORK}" = "prater" ] || [ "${NETWORK}" = "holesky" ]; then
+        BCHTTPURL="http://teku-${NETWORK}.my.ava.do:5051"
     else
         BCHTTPURL="http://teku.my.ava.do:5051"
     fi
     BCJSONRPCURL=""
 elif [ "${CONSENSUSCLIENT}" = "nimbus" ]; then
-    if [ "${NETWORK}" = "prater" ]; then
-        BCHTTPURL="http://nimbus-prater.my.ava.do:5052"
+    if [ "${NETWORK}" = "prater" ] || [ "${NETWORK}" = "holesky" ]; then
+        BCHTTPURL="http://nimbus-${NETWORK}.my.ava.do:5052"
     else
         BCHTTPURL="http://nimbus.my.ava.do:5052"
+    fi
+    BCJSONRPCURL=""
+elif [ "${CONSENSUSCLIENT}" = "lighthouse" ]; then
+    if [ "${NETWORK}" = "prater" ] || [ "${NETWORK}" = "holesky" ]; then
+        BCHTTPURL="http://lighthouse-${NETWORK}.my.ava.do:5052"
+    else
+        BCHTTPURL="http://lighthouse.my.ava.do:5052"
     fi
     BCJSONRPCURL=""
 else
@@ -69,6 +81,19 @@ NETWORK="${NETWORK}" \
     BCHTTPURL="${BCHTTPURL}" \
     BCJSONRPCURL="${BCJSONRPCURL}" \
     envsubst <"$(dirname "$0")/user-settings.template" >"$(dirname "$0")/user-settings.yml"
+
+# Export variables and substitute them in the template
+NETWORK="${NETWORK}" \
+    CONSENSUSCLIENT="${CONSENSUSCLIENT}" \
+    ECHTTPURL="${ECHTTPURL}" \
+    ECWSURL="${ECWSURL}" \
+    BCHTTPURL="${BCHTTPURL}" \
+    BCJSONRPCURL="${BCJSONRPCURL}" \
+    EXECUTIONCLIENT="${EXECUTIONCLIENT}" \
+    CONSENSUSCLIENT="${CONSENSUSCLIENT}" \
+    envsubst <"$(dirname "$0")/settings.template" >"$(dirname "$0")/settings.json"
+
+cat "$(dirname "$0")/settings.json"
 
 # Create folder for rewards trees
 mkdir -p /rocketpool/data/rewards-trees/

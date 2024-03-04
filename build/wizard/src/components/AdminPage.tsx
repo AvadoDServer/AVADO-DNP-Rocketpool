@@ -13,7 +13,7 @@ interface Props {
     utils: any
 }
 
-const AdminPage = ({ wampSession, rpdDaemon, utils } : Props) => {
+const AdminPage = ({ wampSession, rpdDaemon, utils }: Props) => {
     const [isRestartValidator, setIsRestartValidator] = React.useState(false);
     const [isRestartRpNode, setIsRestartRpNode] = React.useState(false);
     const [network, setNetwork] = React.useState("");
@@ -34,23 +34,11 @@ const AdminPage = ({ wampSession, rpdDaemon, utils } : Props) => {
             );
     }
 
-    const toggleNetwork = async () => {
-        const newNetwork = (network === "prater") ? "mainnet" : "prater";
-
-        // updatePackageEnv: {
-        await wampSession.call("updatePackageEnv.dappmanager.dnp.dappnode.eth", [], {
-            id: packageName,
-            envs: { NETWORK: newNetwork },
-            restart: true
-        });
-
-    }
-
     const getNetwork = async () => {
         const packagesRaw = await wampSession.call("listPackages.dappmanager.dnp.dappnode.eth", [],);
         const packages = JSON.parse(packagesRaw);
         if (packages.success) {
-            setNetwork(packages.result.find((r:any) => r.name === packageName).envs.NETWORK)
+            setNetwork(packages.result.find((r: any) => r.name === packageName).envs.NETWORK)
         }
     }
 
@@ -59,7 +47,7 @@ const AdminPage = ({ wampSession, rpdDaemon, utils } : Props) => {
             {/* <p>
                 <a href="http://my.ava.do/#/Packages/rocketpool.avado.dnp.dappnode.eth/detail" target="_blank">Avado Rocket Pool package details</a>
             </p> */}
-            <br/>
+            <br />
             <article className="message is-warning">
                 <div className="message-header">
                     <p>Warning</p>
@@ -82,9 +70,6 @@ const AdminPage = ({ wampSession, rpdDaemon, utils } : Props) => {
             <br />
             <h2 className="title is-3 has-text-white">Switch network from mainnet to testnet (Prater)</h2>
             {network && (<p><b>Current network: </b>{network}</p>)}
-            <div className="field">
-                <button className="button" onClick={toggleNetwork}>Switch network</button>
-            </div>
         </div>
     );
 };

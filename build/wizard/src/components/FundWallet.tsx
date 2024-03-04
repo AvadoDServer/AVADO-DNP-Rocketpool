@@ -13,7 +13,6 @@ const FundWallet = ({ utils, nodeStatus, updateNodeStatus, rplPriceData }: Props
     const ethBalance = BigInt(nodeStatus.accountBalances.eth)
     const rplBalance = BigInt(nodeStatus.accountBalances.rpl)
     const minRplStake = BigInt(rplPriceData.minPer16EthMinipoolRplStake)
-    const maxRplStake = BigInt(rplPriceData.maxPer16EthMinipoolRplStake)
 
     if (rplPriceData)
         console.log("RPL", minRplStake);
@@ -30,7 +29,7 @@ const FundWallet = ({ utils, nodeStatus, updateNodeStatus, rplPriceData }: Props
                             <li>Send 16.4 ETH to <ClickToCopy text={nodeStatus.accountAddress}>{utils.etherscanAddressUrl(nodeStatus.accountAddress)}</ClickToCopy> (16 ETH + 0.2 ETH gas money)</li>
                             <br />(0.4 is a safe margin to create everything - including the expensive minipool contract deploy. The remaining gas can be withdrawn from this wallet later)
                             <li>Send a minimum of {Math.ceil(utils.displayAsETH(minRplStake))} RPL to <ClickToCopy text={nodeStatus.accountAddress}>{utils.etherscanAddressUrl(nodeStatus.accountAddress)}</ClickToCopy>
-                                <br />(maximum allowed stake is {Math.floor(utils.displayAsETH(maxRplStake))} RPL - the more you stake, the more you will earn. More details on the <a target="_blank" href="https://wiki.ava.do/en/tutorials/rocketpool">Avado Rocket Pool Wiki page</a> )
+                                <br />(More details on the <a target="_blank" href="https://wiki.ava.do/en/tutorials/rocketpool">Avado Rocket Pool Wiki page</a>)
                                 <br />(All RPL sent to this wallet will be used as your stake later - so please send exactly the desired stake amount)
                             </li>
                         </ol>

@@ -1,7 +1,7 @@
 import React from "react";
 import { DappManagerHelper } from "./DappManagerHelper";
 import { RestApi } from "./RestApi";
-import { networkType, consensusClientType as consensusClientType, minipoolStatusType, nodeStatusType, consensusClients } from "./Types"
+import { networkType, consensusClientType, minipoolStatusType, nodeStatusType, consensusClients } from "./Types"
 import { KeyManagerHelper } from "./KeyManagerHelper";
 import { confirmAlert } from 'react-confirm-alert';
 
@@ -42,11 +42,19 @@ const ValidatorBanner = ({ dappManagerHelper, minipoolStatus, setKeyManagerHelpe
                 "prater": {
                     "teku": "teku-prater.avado.dnp.dappnode.eth",
                     "nimbus": "nimbus-prater.avado.dnp.dappnode.eth",
+                    "lighthouse": "lighthouse-prater.avado.dnp.dappnode.eth",
                     "prysm": "eth2validator-prater.avado.dnp.dappnode.eth"
+                },
+                "holesky": {
+                    "teku": "teku-holesky.avado.dnp.dappnode.eth",
+                    "nimbus": "nimbus-holesky.avado.dnp.dappnode.eth",
+                    "lighthouse": "lighthouse-holesky.avado.dnp.dappnode.eth",
+                    "prysm": "eth2validator-holesky.avado.dnp.dappnode.eth"
                 },
                 "mainnet": {
                     "teku": "teku.avado.dnp.dappnode.eth",
                     "nimbus": "nimbus.avado.dnp.dappnode.eth",
+                    "lighthouse": "lighthouse.avado.dnp.dappnode.eth",
                     "prysm": "eth2validator.avado.dnp.dappnode.eth"
                 },
             }

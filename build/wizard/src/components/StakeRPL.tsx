@@ -1,5 +1,4 @@
 import React from "react";
-import BN from "bn.js"
 import { confirmAlert } from 'react-confirm-alert';
 import 'react-confirm-alert/src/react-confirm-alert.css';
 import Spinner from "./Spinner";

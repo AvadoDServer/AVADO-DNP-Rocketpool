@@ -1,0 +1,10 @@
+{
+  "network": "${NETWORK}",
+  "consensusclient": "${CONSENSUSCLIENT}",
+  "echttpurl": "${ECHTTPURL}",
+  "ecwsurl": "${ECWSURL}",
+  "bchttpurl": "${BCHTTPURL}",
+  "bcjsonrpcurl": "${BCJSONRPCURL}",
+  "executionclient": "${EXECUTIONCLIENT}",
+  "consensusclient": "${CONSENSUSCLIENT}" 
+}
