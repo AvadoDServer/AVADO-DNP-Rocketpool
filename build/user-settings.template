@@ -6,8 +6,13 @@ addons-gww:
   updateInputTime: "600"
   updatePixelTime: "60"
   updateWallTime: "600"
+addons-rescue-node:
+  enabled: "false"
+  password: ""
+  username: ""
 besu:
   additionalFlags: ""
+  archiveMode: "false"
   containerTag: hyperledger/besu:22.4.1-openjdk-latest
   jvmHeapSize: "0"
   maxBackLayers: "512"
@@ -21,14 +26,14 @@ consensusCommon:
   checkpointSyncUrl: ""
   doppelgangerDetection: "true"
   graffiti: ""
-  openApiPort: "false"
+  openApiPort: closed
   p2pPort: "9001"
 executionCommon:
   enginePort: "8551"
   ethstatsLabel: ""
   ethstatsLogin: ""
   httpPort: "8545"
-  openRpcPorts: "false"
+  openRpcPorts: closed
   p2pPort: "30303"
   wsPort: "8546"
 exporter:
@@ -44,6 +49,18 @@ externalLighthouse:
   doppelgangerDetection: "true"
   graffiti: ""
   httpUrl: ${BCHTTPURL}
+externalLodestar:
+  additionalVcFlags: ""
+  containerTag: chainsafe/lodestar:v1.17.0
+  doppelgangerDetection: "true"
+  graffiti: ""
+  httpUrl: ""
+externalNimbus:
+  additionalVcFlags: ""
+  containerTag: statusim/nimbus-validator-client:multiarch-v24.2.2
+  doppelgangerDetection: "true"
+  graffiti: ""
+  httpUrl: ""
 externalPrysm:
   additionalVcFlags: ""
   containerTag: prysmaticlabs/prysm-validator:HEAD-e26cde-debug
@@ -54,6 +71,7 @@ externalPrysm:
 externalTeku:
   additionalVcFlags: ""
   containerTag: consensys/teku:22.3.2
+  doppelgangerDetection: "true"
   graffiti: ""
   httpUrl: ${BCHTTPURL}
 fallbackNormal:
@@ -65,8 +83,8 @@ fallbackPrysm:
   jsonRpcUrl: ""
 geth:
   additionalFlags: ""
-  cache: "16384"
   containerTag: ethereum/client-go:v1.10.17
+  enablePbss: "true"
   maxPeers: "50"
 grafana:
   containerTag: grafana/grafana:8.3.2
@@ -76,13 +94,28 @@ lighthouse:
   additionalVcFlags: ""
   containerTag: sigp/lighthouse:v2.1.5
   maxPeers: "80"
+  p2pQuicPort: "8001"
+lodestar:
+  additionalBnFlags: ""
+  additionalVcFlags: ""
+  containerTag: chainsafe/lodestar:v1.17.0
+  maxPeers: "50"
 mevBoost:
   additionalFlags: ""
+  aestusEnabled: "false"
+  bloxRouteMaxProfitEnabled: "false"
+  bloxRouteRegulatedEnabled: "false"
   containerTag: flashbots/mev-boost:v0.7.7
+  edenEnabled: "false"
+  enableRegulatedAllMev: "false"
+  enableUnregulatedAllMev: "false"
   externalUrl: ""
+  flashbotsEnabled: "false"
   mode: local
+  openRpcPort: closed
   port: "18550"
-  relays: ""
+  selectionMode: profile
+  ultrasoundEnabled: "false"
 native:
   ccHttpUrl: ${BCHTTPURL}
   consensusClient: ${CONSENSUSCLIENT}
@@ -91,27 +124,39 @@ native:
   validatorStopCommand: /srv/rocketpool/stop-validator.sh
 nethermind:
   additionalFlags: ""
+  additionalModules: ""
+  additionalUrls: ""
   cache: "8192"
   containerTag: nethermind/nethermind:1.13.0
+  fullPruneMemoryBudget: "2048"
+  fullPruningThresholdMb: "51200"
   maxPeers: "50"
   pruneMemSize: "8192"
 nimbus:
-  additionalFlags: ""
+  additionalBnFlags: ""
+  additionalVcFlags: ""
+  bnContainerTag: statusim/nimbus-eth2:multiarch-v24.2.2
   containerTag: statusim/nimbus-eth2:multiarch-v22.3.0
   maxPeers: "160"
+  pruningMode: prune
 prometheus:
   additionalFlags: ""
   containerTag: prom/prometheus:v2.31.1
-  openPort: "false"
+  openPort: closed
   port: "9091"
 prysm:
   additionalBnFlags: ""
   additionalVcFlags: ""
   bnContainerTag: prysmaticlabs/prysm-beacon-chain:HEAD-e26cde-debug
   maxPeers: "45"
-  openRpcPort: "false"
+  openRpcPort: closed
   rpcPort: "5053"
   vcContainerTag: prysmaticlabs/prysm-validator:HEAD-e26cde-debug
+reth:
+  additionalFlags: ""
+  cache: "12288"
+  containerTag: ghcr.io/paradigmxyz/reth:v0.2.0-beta.1
+  maxPeers: "50"
 root:
   bnMetricsPort: "9100"
   consensusClient: nimbus
@@ -120,6 +165,7 @@ root:
   enableBitflyNodeMetrics: "false"
   enableMetrics: "false"
   enableMevBoost: "false"
+  enableODaoMetrics: "false"
   executionClient: geth
   executionClientMode: external
   exporterMetricsPort: "9103"
@@ -130,23 +176,29 @@ root:
   rpDir: /srv/rocketpool/
   useFallbackClients: "false"
   vcMetricsPort: "9101"
-  version: v1.6.2
+  version: v1.11.9
   watchtowerMetricsPort: "9104"
 smartnode:
   archiveECUrl: ""
+  checkpointRetentionLimit: "200"
   dataPath: /rocketpool/data
+  distributeThreshold: "1"
   manualMaxFee: "0"
   minipoolStakeGasThreshold: "150"
   network: ${NETWORK}
   priorityFee: "2"
   projectName: rocketpool
+  recordCheckpointInterval: "45"
+  recordsPath: /srv/rocketpool/data/records
+  rewardsTreeCustomUrl: ""
   rewardsTreeMode: download
-  rplClaimGasThreshold: "150"
-  ttd: ""
-  web3StorageApiToken: ""
+  useRollingRecords: "false"
+  watchtowerMaxFeeOverride: "200"
+  watchtowerPrioFeeOverride: "3"
 teku:
   additionalBnFlags: ""
   additionalVcFlags: ""
+  archiveMode: "false"
   containerTag: consensys/teku:22.3.2
   jvmHeapSize: "0"
   maxPeers: "74"
