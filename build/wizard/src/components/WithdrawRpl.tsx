@@ -19,7 +19,7 @@ const WithdrawRpl = ({ nodeStatus, updateNodeStatus, utils, rpdDaemon }: Props) 
     const [feedback, setFeedback] = React.useState("");
     const [txHash, setTxHash] = React.useState();
 
-    const rplStake = BigInt(nodeStatus.rplStake);
+    const rplStake = BigInt(nodeStatus.rplStake ?? 0);
     React.useEffect(() => {
         if (waitingForTx)
             return;

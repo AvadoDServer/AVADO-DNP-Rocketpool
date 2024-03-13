@@ -206,7 +206,7 @@ const Welcome = ({ utils, nodeSyncStatus, setNavBar, rplPriceData }: Props) => {
                     })}
                     {/* <li>A fully synced Ethereum node. Install the <b>Ethereum Node (Geth)</b> from the <a target="_blank" href="http://my.ava.do/#/installer">DappStore</a></li>
                     <li>A fully synced Beacon chain. Install the <b>Prysm ETH2.0 Beacon Chain</b> from the <a target="_blank" href="http://my.ava.do/#/installer">DappStore</a></li> */}
-                    <li>An Ethereum wallet with 16 ETH + some gas to deposit it in your minipool (0.4 ETH should be enough)</li>
+                    <li>An Ethereum wallet with 8 or 16 ETH + some gas to deposit it in your minipool (0.4 ETH should be enough)</li>
                     <li>An Ethereum wallet with the necessary amount of RPL to stake. {rplPriceData && (<>Minimum stake is currently <b>{Math.ceil(utils.displayAsETH(rplPriceData.minPer16EthMinipoolRplStake))} RPL</b></>)}</li>
                     <li>An Ethereum wallet to receive your staking rewards into. This can be an empty wallet, or a cold storage wallet - as you prefer.</li>
                 </ol>
