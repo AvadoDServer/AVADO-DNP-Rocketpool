@@ -74,8 +74,21 @@ const ValidatorBanner = ({ dappManagerHelper, minipoolStatus, setKeyManagerHelpe
 
                 // TODO: Propose to use other client instead (if installed)? Toggle env is easy to implement 
             } else {
-                const tokenPath = (consensusClient === "teku") ? `/data/data-${network}/validator/key-manager/validator-api-bearer` : `/usr/share/nginx/wizard/auth-token.txt`;
-                const keyManagerAPIUrl = (consensusClient === "teku") ? "https://teku" + (network === "prater" ? "-prater" : "") + ".my.ava.do:5052" : "http://eth2validator" + (network === "prater" ? "-prater" : "") + ".my.ava.do:7500"
+                const tokenPaths = {
+                    "teku": `/data/data-${network}/validator/key-manager/validator-api-bearer`,
+                    "prysm": `/usr/share/nginx/wizard/auth-token.txt`,
+                    "lighthouse": `/data/data-${network}/validators/api-token.txt`,
+                    "nimbus": `/data/data-${network}/keymanagertoken`,
+                }
+                const tokenPath = tokenPaths[consensusClient];
+
+                const keyManagerAPIUrls = {
+                    "teku": "http://teku" + (network === "mainnet" ? "" : `-${network}`) + ".my.ava.do:5052",
+                    "prysm": "http://eth2validator" + (network === "holesky" ? "-holesky" : "") + ".my.ava.do:7500",
+                    "lighthouse": "http://lighthouse" + (network === "mainnet" ? "" : `-${network}`) + ".my.ava.do:9999/keymanager",
+                    "nimbus": "https://nimbus" + (network === "mainnet" ? "" : `-${network}`) + ".my.ava.do:5052"
+                };
+                const keyManagerAPIUrl = keyManagerAPIUrls[consensusClient];
 
                 dappManagerHelper.getFileContentFromContainer(tokenPath, validatorPackage).then(
                     (apiToken) => {

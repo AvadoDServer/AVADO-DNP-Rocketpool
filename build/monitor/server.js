@@ -137,49 +137,52 @@ const rpd = (command) => {
 }
 
 //restart Rocket Pool smartnode
-server.get("/network", (req, res) => {
+server.get("/network", (req, res, next) => {
     res.send(200, network);
+    return next();
 });
 
-server.get("/settings", (req, res) => {
+server.get("/settings", (req, res, next) => {
     try {
         const settings = jsonfile.readFileSync("/srv/rocketpool/settings.json");
         res.send(200, settings);
     } catch (e) {
         console.error(e)
     }
+    return next();
 });
 
-//restart Rocket Pool smartnode
-server.get("/restart-rocketpool-node", (req, res) => {
+// Restart Rocket Pool smartnode
+server.get("/restart-rocketpool-node", async (req, res) => {
     console.log(`Restart Rocket Pool smartnode`);
-    const cmd = "supervisorctl  restart rocketpool-node";
-    execute(cmd).then((stdout) => {
+    const cmd = "supervisorctl restart rocketpool-node";
+
+    try {
+        const stdout = await execute(cmd);
         res.send(200, stdout);
-    }).catch((e) => {
+    } catch (e) {
         res.send(500, e);
-    })
+    }
 });
 
-//backup
+// Backup
 const backupFileName = "rocket-pool-backup.zip";
-server.get("/" + backupFileName, (req, res) => {
-    res.setHeader("Content-Disposition", "attachment; " + backupFileName);
+server.get("/" + backupFileName, (req, res, next) => {
+    res.setHeader("Content-Disposition", "attachment; filename=" + backupFileName);
     res.setHeader("Content-Type", "application/zip");
 
     const zip = new AdmZip();
     zip.addLocalFolder("/rocketpool/data", "data");
-    zip.toBuffer(
-        (buffer, err) => {
-            if (err) {
-                reject(err);
-            } else {
-                res.setHeader("Content-Length", buffer.length);
-                res.end(buffer, "binary");
-            }
-        }
-    )
 
+    try {
+        const buffer = zip.toBuffer();
+        res.setHeader("Content-Length", buffer.length);
+        res.end(buffer, "binary");
+    } catch (err) {
+        next(err);
+    }
+
+    return next();
 });
 
 //restore
@@ -236,8 +239,6 @@ server.post('/restore-backup', (req, res, next) => {
             throw { message: `Invalid backup file. The zip file must contain "${expectedPath}"` }
     }
 });
-
-
 
 server.listen(9999, function () {
     console.log("%s listening at %s", server.name, server.url);

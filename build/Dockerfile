@@ -1,4 +1,4 @@
-FROM node:16.15.0 as builder
+FROM node:21.7.3 as builder
 
 # build wizard
 WORKDIR /usr/src/app/wizard
@@ -14,7 +14,7 @@ RUN yarn --production
 
 ####### Main image
 
-FROM --platform=linux/amd64 node:16.15.0
+FROM --platform=linux/amd64 node:21.7.3
 ARG RP_VERSION
 
 RUN mkdir -p /srv/rocketpool

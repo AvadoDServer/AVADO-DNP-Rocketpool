@@ -10,9 +10,9 @@
   "license": "Apache-2.0",
   "dependencies": {
     "axios": "^0.24.0",
-    "restify": "^8.6.0",
-    "restify-cors-middleware2": "^2.1.2",
-    "adm-zip": "^0.5.9",
+    "restify": "^11.1.0",
+    "restify-cors-middleware2": "^2.2.1",
+    "adm-zip": "^0.5.12",
     "jsonfile": "^6"
   }
 }
