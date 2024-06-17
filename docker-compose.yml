@@ -5,7 +5,7 @@ services:
     build:
       context: ./build
       args:
-        RP_VERSION: v1.13.3
+        RP_VERSION: v1.13.4
     volumes:
       - 'rocketpool:/rocketpool'
     environment:
