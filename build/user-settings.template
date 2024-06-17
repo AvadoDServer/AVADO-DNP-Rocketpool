@@ -176,7 +176,7 @@ root:
   rpDir: /srv/rocketpool/
   useFallbackClients: "false"
   vcMetricsPort: "9101"
-  version: v1.13.4
+  version: v1.13.5
   watchtowerMetricsPort: "9104"
 smartnode:
   archiveECUrl: ""
