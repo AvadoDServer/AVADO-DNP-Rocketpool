@@ -73,13 +73,13 @@ const SetupWizard = ({ utils, walletStatus, updateWalletStatus, nodeStatus, rplP
             }
             if (nodeStatus.status === "success"
                 && nodeStatus.registered
-                && nodeStatus.withdrawalAddress === nodeStatus.accountAddress) {
+                && nodeStatus.primaryWithdrawalAddress === nodeStatus.accountAddress) {
                 setViewState(withdrawalAddress);
                 return;
             }
             if (nodeStatus.status === "success"
                 && nodeStatus.registered
-                && nodeStatus.withdrawalAddress !== nodeStatus.accountAddress) {
+                && nodeStatus.primaryWithdrawalAddress !== nodeStatus.accountAddress) {
                 if (!nodeStatus.feeRecipientInfo.isInSmoothingPool) {
                     setViewState(joinSmoothingPool);
                 } else {
