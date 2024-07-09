@@ -40,8 +40,8 @@ const NodeStatus = ({ utils, nodeStatus, nodeSyncStatus, updateNodeStatus, rpdDa
                             <tr>
                                 <td><b>Withdrawal address</b></td>
                                 <td>
-                                    {utils.etherscanAddressUrl(nodeStatus.withdrawalAddress)}{" "}
-                                    {utils.rocketscanUrl("/address/" + nodeStatus.withdrawalAddress, <FontAwesomeIcon icon={faRocket} />)}
+                                    {utils.etherscanAddressUrl(nodeStatus.primaryWithdrawalAddress)}{" "}
+                                    {utils.rocketscanUrl("/address/" + nodeStatus.primaryWithdrawalAddress, <FontAwesomeIcon icon={faRocket} />)}
                                 </td>
                             </tr>
                             <tr>

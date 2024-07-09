@@ -19,7 +19,7 @@ interface Props {
     rpdDaemon: any,
 }
 
-const SetWithdrawalAddress = ({ utils, nodeStatus, updateNodeStatus, rpdDaemon } : Props) => {
+const SetWithdrawalAddress = ({ utils, nodeStatus, updateNodeStatus, rpdDaemon }: Props) => {
     const [withdrawalAddress, setWithdrawalAddress] = React.useState("");
     const [addressFeedback, setAddressFeedback] = React.useState("");
     const [buttonDisabled, setButtonDisabled] = React.useState(false);
@@ -48,7 +48,7 @@ const SetWithdrawalAddress = ({ utils, nodeStatus, updateNodeStatus, rpdDaemon }
 
     React.useEffect(() => {
         if (waitingForTx && txHash) {
-            rpdDaemon(`wait ${txHash}`, (data:any) => {
+            rpdDaemon(`wait ${txHash}`, (data: any) => {
                 const w3 = new web3(utils.wsProvider());
                 w3.eth.getTransactionReceipt(txHash).then((receipt) => {
                     console.log(receipt);
@@ -70,7 +70,7 @@ const SetWithdrawalAddress = ({ utils, nodeStatus, updateNodeStatus, rpdDaemon }
             buttons: [
                 {
                     label: 'Yes I own and control this address',
-                    onClick: () => rpdDaemon(`node set-withdrawal-address ${withdrawalAddress} yes`, (data : any) => {
+                    onClick: () => rpdDaemon(`node set-withdrawal-address ${withdrawalAddress} yes`, (data: any) => {
                         if (data.status === "error") {
                             setAddressFeedback(data.error);
                         }
@@ -89,7 +89,7 @@ const SetWithdrawalAddress = ({ utils, nodeStatus, updateNodeStatus, rpdDaemon }
     }
 
 
-    if (!(nodeStatus && nodeStatus.withdrawalAddress === nodeStatus.accountAddress)) {
+    if (!(nodeStatus && nodeStatus.primaryWithdrawalAddress === nodeStatus.accountAddress)) {
         return <></>
     }
     return (
@@ -137,7 +137,7 @@ const SetWithdrawalAddress = ({ utils, nodeStatus, updateNodeStatus, rpdDaemon }
                     )}
                 </div>
                 <div className="field">
-                    <br/>
+                    <br />
                     <button className="button" onClick={onClick} disabled={buttonDisabled}>
                         {waitingForTx ? <Spinner /> : "Set withdrawal address"}
                     </button>
