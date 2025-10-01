@@ -19,8 +19,8 @@ ARG RP_VERSION
 
 RUN mkdir -p /srv/rocketpool
 
-RUN wget "https://github.com/rocket-pool/smartnode-install/releases/download/${RP_VERSION}/rocketpool-cli-linux-amd64" -O /usr/local/bin/rocketpool
-RUN wget "https://github.com/rocket-pool/smartnode-install/releases/download/${RP_VERSION}/rocketpool-daemon-linux-amd64" -O /usr/local/bin/rocketpoold
+RUN wget "https://github.com/rocket-pool/smartnode/releases/download/${RP_VERSION}/rocketpool-cli-linux-amd64" -O /usr/local/bin/rocketpool
+RUN wget "https://github.com/rocket-pool/smartnode/releases/download/${RP_VERSION}/rocketpool-daemon-linux-amd64" -O /usr/local/bin/rocketpoold
 
 RUN chmod +x /usr/local/bin/rocketpool /usr/local/bin/rocketpoold
 
