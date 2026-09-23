@@ -30,11 +30,17 @@ export const MAX_BODY_BYTES = 64 * 1024;
 export async function readBody(req: IncomingMessage, limit = MAX_BODY_BYTES): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
-  for await (const chunk of req) {
-    const buf = chunk as Buffer;
-    size += buf.length;
-    if (size > limit) throw new HttpError(413, "Request body too large");
-    chunks.push(buf);
+  try {
+    for await (const chunk of req) {
+      const buf = chunk as Buffer;
+      size += buf.length;
+      if (size > limit) throw new HttpError(413, "Request body too large");
+      chunks.push(buf);
+    }
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    // the client went away mid-body (Node reports "aborted" / ECONNRESET): not a server error
+    throw new HttpError(499, "Client closed the request");
   }
   return Buffer.concat(chunks);
 }
@@ -74,4 +80,21 @@ export function parseParams(contentType: string | undefined, body: Buffer): Map<
     return params;
   }
   throw new HttpError(415, "Use application/json or application/x-www-form-urlencoded");
+}
+
+/** A tiny counting limiter: try() takes a slot or returns false; release() gives it back. */
+export class Limiter {
+  private active = 0;
+  constructor(private readonly max: number) {}
+  try(): boolean {
+    if (this.active >= this.max) return false;
+    this.active++;
+    return true;
+  }
+  release(): void {
+    if (this.active > 0) this.active--;
+  }
+  get inUse(): number {
+    return this.active;
+  }
 }

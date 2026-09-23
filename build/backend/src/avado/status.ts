@@ -2,6 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { listBackups, type BackupInfo } from "../backup";
 import type { Config } from "../config";
+import type { Limiter } from "../http-util";
 import { redact } from "../log";
 import { recentErrors } from "./logs";
 import { getProcessState, type ProcessState } from "./supervisor";
@@ -53,7 +54,17 @@ async function healthz(snApi: string): Promise<boolean> {
   }
 }
 
-export async function getAvadoStatus(config: Config): Promise<AvadoStatus> {
+async function limitedErrors(file: string, limiter: Limiter): Promise<string[]> {
+  // under load the error lines are skipped rather than queued
+  if (!limiter.try()) return [];
+  try {
+    return await recentErrors(file);
+  } finally {
+    limiter.release();
+  }
+}
+
+export async function getAvadoStatus(config: Config, logLimiter: Limiter): Promise<AvadoStatus> {
   const d = config.dataDir;
   const [daemon, apiReachable, apiTokenPresent, startupError, daemonErrors, backups, wallet, password, mnemonic, marker] =
     await Promise.all([
@@ -61,7 +72,7 @@ export async function getAvadoStatus(config: Config): Promise<AvadoStatus> {
       healthz(config.snApi),
       isFile(path.join(d, "api-tokens.json")),
       readSmall(config.startupErrorFile),
-      recentErrors(config.daemonLogFile),
+      limitedErrors(config.daemonLogFile, logLimiter),
       listBackups(config.backupDir),
       isFile(path.join(d, "wallet")),
       isFile(path.join(d, "password")),

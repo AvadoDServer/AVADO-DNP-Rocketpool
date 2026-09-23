@@ -1,4 +1,5 @@
 import path from "node:path";
+import { DEFAULT_ALLOWED_HOSTNAMES } from "./host";
 
 /** Runtime configuration. Everything comes from the environment, with the package defaults. */
 export interface Config {
@@ -37,6 +38,12 @@ export interface Config {
   wampUrl: string;
   /** Reconcile loop interval in ms. */
   reconcileIntervalMs: number;
+  /** DNS names accepted in the Host header of /api/* requests (IP literals and localhost always are). */
+  allowedHostnames: string[];
+  /** Max concurrent long-running proxy requests (/api/wait, wallet recover, …). */
+  longRequestLimit: number;
+  /** Max concurrent daemon log reads (/api/avado/logs, status). */
+  logReadLimit: number;
 }
 
 function num(value: string | undefined, fallback: number): number {
@@ -67,5 +74,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     consensusClient: env.CONSENSUSCLIENT || undefined,
     wampUrl: env.WAMP_URL || "ws://wamp.my.ava.do:8080/ws",
     reconcileIntervalMs: num(env.RECONCILE_INTERVAL_MS, 5 * 60_000),
+    allowedHostnames: [
+      ...DEFAULT_ALLOWED_HOSTNAMES,
+      ...(env.EXTRA_ALLOWED_HOSTS || "")
+        .split(",")
+        .map((h) => h.trim().toLowerCase())
+        .filter(Boolean),
+    ],
+    longRequestLimit: num(env.LONG_REQUEST_LIMIT, 20),
+    logReadLimit: num(env.LOG_READ_LIMIT, 4),
   };
 }

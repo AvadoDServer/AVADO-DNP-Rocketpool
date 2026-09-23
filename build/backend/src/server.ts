@@ -15,6 +15,7 @@ const server = http.createServer(createApp(config, logger));
 // /api/wait and wallet recovery hold a response open; that is bounded per route in sn/proxy.ts
 server.requestTimeout = 120_000; // time to receive a request, not to answer it
 server.headersTimeout = 60_000;
+server.maxConnections = 256;
 
 server.listen(config.port, config.host, () => {
   logger.info(`AVADO Rocket Pool backend listening on ${config.host}:${config.port} (UI ${config.uiDir}, Smartnode ${config.snApi})`);

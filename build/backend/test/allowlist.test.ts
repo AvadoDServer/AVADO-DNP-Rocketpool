@@ -12,6 +12,8 @@ test("unknown and deliberately excluded routes are 404 and never reach Smartnode
     "/api/sn/does/not-exist",
     "/api/sn/service/terminate-data-folder",
     "/api/sn/wallet/masquerade",
+    "/api/sn/wallet/test-recover",
+    "/api/sn/wallet/test-search-and-recover",
     "/api/sn/node/sign",
     "/api/sn/odao/status",
     "/api/sn/constructor",
