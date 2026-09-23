@@ -27,7 +27,11 @@ export interface LoopOptions {
   /** Shortest gap between two runs (trigger spam). */
   minGapMs: number;
   /** Builds the per-run dependencies (a fresh WAMP session etc.) and a cleanup. */
-  makeDeps(trigger: ReconcileStatus["trigger"], importAttempts: Map<string, ImportAttempts>): { deps: RunDeps; dispose(): void };
+  makeDeps(
+    trigger: ReconcileStatus["trigger"],
+    importAttempts: Map<string, ImportAttempts>,
+    seenLoaded: Map<string, string>,
+  ): { deps: RunDeps; dispose(): void };
   log(level: "info" | "warn" | "error", msg: string): void;
 }
 
@@ -46,6 +50,8 @@ export async function writeStatusFile(file: string, status: ReconcileStatus): Pr
 
 export function startLoop(opts: LoopOptions): ReconcileLoop {
   const importAttempts = new Map<string, ImportAttempts>();
+  /** Keys seen loaded during this process, and when: older approvals count as used (run.ts). */
+  const seenLoaded = new Map<string, string>();
   let stopped = false;
   let running: Promise<void> | null = null;
   let lastRunEnd = 0;
@@ -54,7 +60,7 @@ export function startLoop(opts: LoopOptions): ReconcileLoop {
   let firstRun = true;
 
   const runOnce = async (trigger: ReconcileStatus["trigger"]) => {
-    const { deps, dispose } = opts.makeDeps(trigger, importAttempts);
+    const { deps, dispose } = opts.makeDeps(trigger, importAttempts, seenLoaded);
     try {
       const status = await runReconcile(deps);
       // Keys left over for the next run (MAX_IMPORTS_PER_RUN) follow soon, not in 5 minutes.

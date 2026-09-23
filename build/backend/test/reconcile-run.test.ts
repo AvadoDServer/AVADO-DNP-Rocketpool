@@ -78,6 +78,10 @@ interface Fixture {
   snCalls: string[];
   wampCalls: number;
   attempts: Map<string, ImportAttempts>;
+  /** The loop's per-process set of keys seen loaded. */
+  seenLoaded: Map<string, string>;
+  failConsume?: boolean;
+  failWritable?: boolean;
   /** The clock for the next run. */
   now: Date;
 }
@@ -117,6 +121,7 @@ function fixture(o: Partial<Fixture> = {}): Fixture {
     snCalls: [],
     wampCalls: 0,
     attempts: new Map(),
+    seenLoaded: new Map(),
     now: T0,
     ...o,
   };
@@ -152,11 +157,16 @@ function deps(f: Fixture): RunDeps {
       ...(f.approvedError ? { error: f.approvedError } : {}),
     }),
     async consumeApprovals(pubkeys) {
+      if (f.failConsume) throw new Error("ENOSPC: no space left on device");
       for (const p of pubkeys) {
         const e = f.approved.get(p);
         if (e && !e.loadedAt) e.loadedAt = f.now.toISOString();
       }
     },
+    async checkApprovalsWritable() {
+      if (f.failWritable) throw new Error("EROFS: read-only file system");
+    },
+    seenLoaded: f.seenLoaded,
     readAbsence: async () => new Map(f.absence),
     async writeAbsence(map) {
       f.absence = new Map(map);
@@ -630,10 +640,15 @@ test("I2: an owner-approved key is imported only after 20 minutes of continuous 
   assert.equal(s.validators[0].state, "settling");
   assert.equal(s.validators[0].settlesAt, at(20).toISOString());
   assert.match(s.message, /absent everywhere for 20 minutes/);
-  f.now = at(10);
+  f.now = at(5);
   f.attempts = new Map(); // a backend restart: the observations are persisted
+  f.seenLoaded = new Map();
   s = await runReconcile(deps(f));
   assert.equal(s.validators[0].state, "settling");
+  for (const m of [10, 15]) {
+    f.now = at(m);
+    assert.equal((await runReconcile(deps(f))).validators[0].state, "settling");
+  }
   f.now = at(19);
   assert.equal((await runReconcile(deps(f))).validators[0].state, "settling");
   f.now = at(20);
@@ -665,7 +680,7 @@ test("I2: a gap in the observations or a sighting restarts the clock", async () 
   f.now = at(31);
   await runReconcile(deps(f)); // present: the clock stops (and the approval is used up)
   nimbus.keys.delete(pk("1"));
-  f.approved = approvals(owner, pk("1")); // the owner approves again
+  f.approved = new Map([[pk("1"), { source: "owner", approvedAt: at(31.5).toISOString() }]]); // the owner approves again
   f.now = at(32);
   s = await runReconcile(deps(f));
   assert.equal(s.validators[0].state, "settling");
@@ -771,4 +786,89 @@ test("M6: when reading a fee recipient fails, setting it is still tried once", a
   const s2 = await runReconcile(deps(f));
   assert.equal(s2.feeRecipients.failed, 2);
   assert.match(s2.validators[0].feeRecipient.clients[0].error!, /reading failed.*setting failed/);
+});
+
+// ---------- Fix round 3 ----------
+
+test("R1: if recording a used approval fails, the key is never re-imported and nothing else loads that run", async () => {
+  const f = fixture({ failConsume: true }); // disk full
+  const teku = f.kms.teku!;
+  const s1 = await runReconcile(deps(f));
+  // key 1 was imported; recording that failed, so key 2 is not loaded in this run
+  assert.equal(teku.imported.length, 1);
+  assert.equal(s1.validators[0].state, "imported");
+  assert.equal(s1.validators[1].state, "import-blocked");
+  assert.ok(s1.importBlockedReasons.some((r) => /could not record which keys are loaded/.test(r)));
+  assert.equal(f.approved.get(pk("1"))!.loadedAt, undefined, "the file still says unused");
+
+  teku.keys.delete(pk("1")); // the owner removes key 1 on purpose
+  f.failConsume = false;
+  f.now = at(5);
+  const s2 = await runReconcile(deps(f));
+  assert.equal(s2.validators[0].state, "awaiting-approval", "the process remembers it was loaded");
+  assert.deepEqual(teku.imported.map((i) => JSON.parse(i.keystoreJson).pubkey), [pk("1"), pk("2")]);
+});
+
+test("R1: a key seen loaded while the write fails blocks every import in that run", async () => {
+  const f = fixture({ failConsume: true });
+  f.kms.teku!.keys.add(pk("1")); // loaded by hand, approval unused on disk
+  const s = await runReconcile(deps(f));
+  assert.equal(f.kms.teku!.imported.length, 0);
+  assert.equal(s.validators[1].state, "import-blocked");
+  f.kms.teku!.keys.delete(pk("1"));
+  f.failConsume = false;
+  f.now = at(5);
+  const s2 = await runReconcile(deps(f));
+  assert.equal(s2.validators[0].state, "awaiting-approval");
+});
+
+test("R1: when the approval state cannot be saved at all, nothing is loaded and the status says why", async () => {
+  const f = fixture({ failWritable: true });
+  const s = await runReconcile(deps(f));
+  assert.equal(f.kms.teku!.imported.length, 0);
+  assert.ok(s.validators.every((v) => v.state === "import-blocked"));
+  assert.ok(s.importBlockedReasons.some((r) => r.startsWith("Can't save approval state — disk full or read-only")));
+  assert.ok(s.errors.some((e) => /Can't save approval state/.test(e)));
+});
+
+test("R1: a later owner approval in the same process is honoured", async () => {
+  const f = fixture({ approved: approvals(deposit, pk("1")) });
+  onlyKey1(f);
+  const teku = f.kms.teku!;
+  await runReconcile(deps(f));
+  teku.keys.delete(pk("1"));
+  f.approved = new Map([[pk("1"), { source: "owner", approvedAt: at(1).toISOString() }]]);
+  for (const m of [2, 7, 12, 17]) {
+    f.now = at(m);
+    assert.equal((await runReconcile(deps(f))).validators[0].state, "settling");
+  }
+  f.now = at(22);
+  assert.equal((await runReconcile(deps(f))).validators[0].state, "imported");
+});
+
+test("R2: the deposit exemption expires 24 hours after the deposit was recorded", async () => {
+  const f = fixture({ approved: new Map([[pk("1"), { source: "deposit", approvedAt: new Date(T0.getTime() - 24 * 3600_000).toISOString() }]]) });
+  onlyKey1(f);
+  const s = await runReconcile(deps(f));
+  assert.equal(s.validators[0].state, "settling");
+  assert.equal(f.kms.teku!.imported.length, 0);
+  const g = fixture({ approved: new Map([[pk("1"), { source: "deposit", approvedAt: new Date(T0.getTime() - 23 * 3600_000).toISOString() }]]) });
+  onlyKey1(g);
+  assert.equal((await runReconcile(deps(g))).validators[0].state, "imported");
+});
+
+test("R3: 20 minutes are not enough without 4 spaced absent observations", async () => {
+  const f = fixture({ approved: approvals(owner, pk("1")) });
+  onlyKey1(f);
+  for (const m of [0, 10, 20]) {
+    f.now = at(m);
+    assert.equal((await runReconcile(deps(f))).validators[0].state, "settling", `at ${m}`);
+  }
+  assert.equal(f.absence.get(pk("1"))!.count, 3);
+  // runs closer than 4 minutes (triggers) count once
+  f.now = at(21);
+  assert.equal((await runReconcile(deps(f))).validators[0].state, "settling");
+  assert.equal(f.absence.get(pk("1"))!.count, 3);
+  f.now = at(24);
+  assert.equal((await runReconcile(deps(f))).validators[0].state, "imported");
 });

@@ -16,8 +16,11 @@
  *        uses its approval up, so a key the owner removes later waits for a new approval.
  *      - every installed client's key list was read, and no unknown validator package is
  *        installed
- *      - it has been absent from every installed client for SETTLE_MS (absence.ts), unless
- *        it is a deposit key that was never seen in any client
+ *      - it has been absent from every installed client for SETTLE_MS and in at least
+ *        MIN_ABSENT_OBSERVATIONS spaced runs (absence.ts), unless it is a deposit key that was
+ *        never seen in any client, approved less than DEPOSIT_EXEMPTION_MS ago
+ *      - the approval state can be saved (a used approval must be recorded before anything
+ *        else is loaded); keys seen loaded by this process count as used whatever the file says
  *      - the chosen client's package is safe to import into (Teku: TEKU_SAFE_IMPORT_VERSION)
  *      - its import has not failed MAX_IMPORT_ATTEMPTS times since it was last approved
  *  6. Set the fee recipient of each Rocket Pool key in EVERY installed client whose list was
@@ -26,7 +29,7 @@
  * Never deletes a key, never touches a key that is not a Rocket Pool key of this node,
  * never throws: every failure ends up in the returned status.
  */
-import { settlesAt, updateAbsence, type AbsenceMap, type Observation } from "./absence";
+import { isSettled, settlesAt, updateAbsence, type AbsenceMap, type Observation } from "./absence";
 import { isUsable, type ApprovedEntry, type ApprovedRead } from "./approved";
 import type { ClientId, ClientInfo, InstalledPackage } from "./clients";
 import { importAllowed, selectClient } from "./clients";
@@ -41,6 +44,8 @@ export const STATUS_VERSION = 2;
 export const MAX_IMPORT_ATTEMPTS = 3;
 /** Imports per run; the rest follow in the next run. */
 export const MAX_IMPORTS_PER_RUN = 20;
+/** A deposit approval skips the settling delay only this long after the deposit was recorded. */
+export const DEPOSIT_EXEMPTION_MS = 24 * 60 * 60_000;
 
 export type ReconcileState = "ok" | "waiting" | "attention" | "error";
 
@@ -161,6 +166,14 @@ export interface RunDeps {
   readApproved(): Promise<ApprovedRead>;
   /** Marks the approvals of these keys as used (they were seen loaded). */
   consumeApprovals(pubkeys: string[]): Promise<void>;
+  /** Throws when the approval state cannot be saved (disk full, read-only). */
+  checkApprovalsWritable(): Promise<void>;
+  /**
+   * Keys this process has seen loaded, and when (last time), kept by the loop for the process
+   * lifetime. An approval given before that moment counts as used even when recording that
+   * on disk failed; a later owner approval is a new one.
+   */
+  seenLoaded: Map<string, string>;
   /** Persisted absence observations (settling delay). */
   readAbsence(): Promise<AbsenceMap>;
   writeAbsence(map: AbsenceMap): Promise<void>;
@@ -366,16 +379,23 @@ async function reconcile(
   } catch (e) {
     status.errors.push(`The approved-keys list could not be read: ${msgOf(e)}`);
   }
+  const usable = (pk: string) => {
+    const e = approvals.get(pk);
+    const seen = deps.seenLoaded.get(pk);
+    return isUsable(e) && !(seen && Date.parse(seen) >= (Date.parse(e!.approvedAt) || 0));
+  };
   const consume = async (pks: string[]) => {
+    const at = now().toISOString();
     const fresh = pks.filter((pk) => isUsable(approvals.get(pk)));
+    for (const pk of pks) deps.seenLoaded.set(pk, at);
     if (fresh.length === 0) return;
+    for (const pk of fresh) approvals.set(pk, { ...approvals.get(pk)!, loadedAt: at });
     try {
       await deps.consumeApprovals(fresh);
     } catch (e) {
-      status.errors.push(`Could not record that approved keys are loaded: ${msgOf(e)}`);
+      // The approval stays unused on disk; nothing else is loaded until it can be recorded.
+      blockReasons.push(`could not record which keys are loaded (${msgOf(e)}); no key is loaded until the approval state can be saved`);
     }
-    const at = now().toISOString();
-    for (const pk of fresh) approvals.set(pk, { ...approvals.get(pk)!, loadedAt: at });
   };
   await consume(status.validators.filter((v) => v.loadedIn.length > 0).map((v) => v.pubkey));
 
@@ -395,6 +415,11 @@ async function reconcile(
   }
 
   // 5. Imports into the chosen client
+  try {
+    await deps.checkApprovalsWritable();
+  } catch (e) {
+    blockReasons.push(`Can't save approval state — disk full or read-only (${msgOf(e)}); no key is loaded until it can be saved`);
+  }
   const gate = chosen ? importAllowed(chosen, versionOf(chosen)) : { allowed: false };
   if (chosen && !gate.allowed && gate.reason) blockReasons.push(gate.reason);
   const chosenKm = chosen ? kms.get(chosen.id) : undefined;
@@ -403,7 +428,7 @@ async function reconcile(
   for (const v of status.validators) {
     if (v.loadedIn.length > 0) continue;
     const found = approvals.get(v.pubkey);
-    if (!found || !isUsable(found)) {
+    if (!found || !usable(v.pubkey)) {
       const entry = found;
       // Only offer keys that could actually be loaded.
       const ks = await deps.loadKeystore(v.pubkey, chosen?.id ?? "teku");
@@ -431,11 +456,13 @@ async function reconcile(
       v.state = "import-blocked";
       continue;
     }
-    // Settling: deposit keys never seen in any client are exempt (an unused deposit approval
-    // means the key has not been seen loaded since it was created).
-    if (entry.source !== "deposit") {
-      const at = settlesAt(absence.get(v.pubkey));
-      if (!at || at.getTime() > now().getTime()) {
+    // Settling: deposit keys never seen in any client are exempt for DEPOSIT_EXEMPTION_MS (an
+    // unused deposit approval means the key has not been seen loaded since it was created).
+    const exempt = entry.source === "deposit" && now().getTime() - (Date.parse(entry.approvedAt) || 0) < DEPOSIT_EXEMPTION_MS;
+    if (!exempt) {
+      const a = absence.get(v.pubkey);
+      const at = settlesAt(a);
+      if (!isSettled(a, now())) {
         v.state = "settling";
         if (at) v.settlesAt = at.toISOString();
         v.error = "Waiting to make sure this key is not running anywhere else before loading it.";

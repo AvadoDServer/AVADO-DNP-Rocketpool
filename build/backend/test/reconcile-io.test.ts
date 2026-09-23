@@ -295,6 +295,8 @@ test("end to end: imports into the chosen client from disk; the other client onl
         entries: new Map([pk("2"), pk("3")].map((k) => [k, { source: "deposit" as const, approvedAt: "2026-09-23T09:00:00.000Z" }])),
       }),
       consumeApprovals: async () => {},
+      checkApprovalsWritable: async () => {},
+      seenLoaded: new Map(),
       readAbsence: async () => new Map(),
       writeAbsence: async () => {},
       configuredClient: "teku",
@@ -338,7 +340,7 @@ test("loop: runs on the trigger file, removes it, writes the status file atomica
     triggerPollMs: 20,
     minGapMs: 0,
     log: () => {},
-    makeDeps(trigger, importAttempts) {
+    makeDeps(trigger, importAttempts, seenLoaded) {
       triggers.push(trigger);
       attemptsSeen.push(importAttempts.size);
       importAttempts.set("x", { count: 3, lastFailAt: "2026-09-23T10:00:00.000Z" });
@@ -352,6 +354,8 @@ test("loop: runs on the trigger file, removes it, writes the status file atomica
           loadKeystore: async () => ({ problem: "missing" }),
           readApproved: async () => ({ entries: new Map() }),
           consumeApprovals: async () => {},
+          checkApprovalsWritable: async () => {},
+          seenLoaded,
           readAbsence: async () => new Map(),
           writeAbsence: async () => {},
           configuredClient: undefined,

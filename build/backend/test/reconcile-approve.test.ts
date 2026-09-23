@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, afterEach, before, beforeEach, test } from "node:test";
 import { ABSENCE_FILE, readAbsence, updateAbsence, writeAbsence } from "../src/reconcile/absence";
-import { addApprovedKeys, APPROVED_KEYS_FILE, consumeApprovals, isUsable, readApprovedKeys } from "../src/reconcile/approved";
+import { addApprovedKeys, APPROVED_KEYS_FILE, checkApprovalsWritable, consumeApprovals, isUsable, readApprovedKeys } from "../src/reconcile/approved";
 import { startHarness, type Harness } from "./helpers";
 
 const pk = (c: string) => c.repeat(96);
@@ -84,6 +84,17 @@ test("absence observations persist across restarts; an unreadable file means not
   assert.deepEqual(await readAbsence(dir), m);
   await writeFile(path.join(dir, ABSENCE_FILE), "garbage");
   assert.equal((await readAbsence(dir)).size, 0);
+});
+
+test("checkApprovalsWritable: passes and leaves nothing behind; throws on a read-only data dir", async () => {
+  await checkApprovalsWritable(dir);
+  assert.deepEqual(await readdir(dir), []);
+  await chmod(dir, 0o500);
+  try {
+    if (process.getuid?.() !== 0) await assert.rejects(() => checkApprovalsWritable(dir));
+  } finally {
+    await chmod(dir, 0o700);
+  }
 });
 
 // ---------- HTTP: approve endpoint and the node/deposit hook ----------

@@ -20,7 +20,7 @@
  * versions ignore it. Entries are never removed. Writes are atomic (temp file + rename)
  * and serialised within the process.
  */
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { normalizePubkey } from "./hex";
 
@@ -130,6 +130,16 @@ export function addApprovedKeys(dataDir: string, pubkeys: unknown[], source: App
     }
     return changed;
   });
+}
+
+/**
+ * Throws when the approval state could not be saved: writes and removes a probe file next to
+ * the list (only the probe this function created is ever removed).
+ */
+export async function checkApprovalsWritable(dataDir: string): Promise<void> {
+  const probe = `${approvedKeysPath(dataDir)}.probe-${process.pid}`;
+  await writeFile(probe, "probe\n", { mode: 0o600 });
+  await rm(probe, { force: true });
 }
 
 /** Marks unused approvals of these keys as used (the keys were seen loaded). */

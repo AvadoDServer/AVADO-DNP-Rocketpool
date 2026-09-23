@@ -15,7 +15,7 @@ import { HttpError } from "../http-util";
 import type { Logger } from "../log";
 import { SmartnodeClient } from "../sn/proxy";
 import { readAbsence, writeAbsence } from "./absence";
-import { consumeApprovals, readApprovedKeys } from "./approved";
+import { checkApprovalsWritable, consumeApprovals, readApprovedKeys } from "./approved";
 import { listInstalledPackages } from "./clients";
 import { createKeymanager } from "./keymanager";
 import { loadKeystore } from "./keystores";
@@ -67,7 +67,7 @@ export function startReconcileLoop(config: Config, logger: Logger): ReconcileLoo
     triggerPollMs: 2_000,
     minGapMs: 10_000,
     log: (level, msg) => logger[level](msg),
-    makeDeps(trigger, importAttempts) {
+    makeDeps(trigger, importAttempts, seenLoaded) {
       const wamp = new WampClient({ url: config.wampUrl, realm: "dappnode_admin" });
       return {
         deps: {
@@ -80,6 +80,8 @@ export function startReconcileLoop(config: Config, logger: Logger): ReconcileLoo
           consumeApprovals: async (pubkeys) => {
             await consumeApprovals(config.dataDir, pubkeys);
           },
+          checkApprovalsWritable: () => checkApprovalsWritable(config.dataDir),
+          seenLoaded,
           readAbsence: () => readAbsence(config.dataDir),
           writeAbsence: (map) => writeAbsence(config.dataDir, map),
           configuredClient: config.consensusClient,

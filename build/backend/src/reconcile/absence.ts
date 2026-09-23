@@ -7,7 +7,9 @@
  *
  * "Continuously" means: every run in between saw the key absent in every installed client,
  * every client could be read, and no two observations are more than MAX_OBSERVATION_GAP_MS
- * apart (a longer gap, e.g. the backend was down, restarts the clock). The observations are
+ * apart (a longer gap, e.g. the backend was down, restarts the clock). Because the wall
+ * clock can jump (NTP right after boot), the key must also have been counted absent in at
+ * least MIN_ABSENT_OBSERVATIONS runs that were at least MIN_OBSERVATION_SPACING_MS apart. The observations are
  * persisted (<dataDir>/.avado-key-absence.json) so a backend restart does not reset them.
  * Losing the file only makes the loop wait longer.
  *
@@ -20,10 +22,16 @@ import { normalizePubkey } from "./hex";
 export const ABSENCE_FILE = ".avado-key-absence.json";
 export const SETTLE_MS = 20 * 60_000;
 export const MAX_OBSERVATION_GAP_MS = 15 * 60_000;
+export const MIN_ABSENT_OBSERVATIONS = 4;
+/** Observations closer together than this (e.g. trigger runs) count once. */
+export const MIN_OBSERVATION_SPACING_MS = 4 * 60_000;
 
 export interface AbsenceEntry {
   absentSince: string;
   lastObservedAt: string;
+  /** Consecutive absent observations, counted at most once per MIN_OBSERVATION_SPACING_MS. */
+  count: number;
+  lastCountedAt: string;
 }
 export type AbsenceMap = Map<string, AbsenceEntry>;
 
@@ -41,7 +49,9 @@ export async function readAbsence(dataDir: string): Promise<AbsenceMap> {
       const e = v as Partial<AbsenceEntry> | null;
       if (!pk || typeof e?.absentSince !== "string" || typeof e?.lastObservedAt !== "string") continue;
       if (Number.isNaN(Date.parse(e.absentSince)) || Number.isNaN(Date.parse(e.lastObservedAt))) continue;
-      out.set(pk, { absentSince: e.absentSince, lastObservedAt: e.lastObservedAt });
+      const count = typeof e.count === "number" && Number.isInteger(e.count) && e.count > 0 ? e.count : 1;
+      const lastCountedAt = typeof e.lastCountedAt === "string" && !Number.isNaN(Date.parse(e.lastCountedAt)) ? e.lastCountedAt : e.lastObservedAt;
+      out.set(pk, { absentSince: e.absentSince, lastObservedAt: e.lastObservedAt, count, lastCountedAt });
     }
   } catch {
     /* missing or unreadable: no key counts as settled */
@@ -64,7 +74,17 @@ export function updateAbsence(prev: AbsenceMap, observations: Map<string, Observ
     if (obs !== "absent") continue;
     const p = prev.get(pk);
     const gap = p ? now.getTime() - Date.parse(p.lastObservedAt) : Infinity;
-    next.set(pk, p && gap >= 0 && gap <= MAX_OBSERVATION_GAP_MS ? { absentSince: p.absentSince, lastObservedAt: at } : { absentSince: at, lastObservedAt: at });
+    if (!p || gap < 0 || gap > MAX_OBSERVATION_GAP_MS) {
+      next.set(pk, { absentSince: at, lastObservedAt: at, count: 1, lastCountedAt: at });
+      continue;
+    }
+    const counts = now.getTime() - Date.parse(p.lastCountedAt) >= MIN_OBSERVATION_SPACING_MS;
+    next.set(pk, {
+      absentSince: p.absentSince,
+      lastObservedAt: at,
+      count: counts ? p.count + 1 : p.count,
+      lastCountedAt: counts ? at : p.lastCountedAt,
+    });
   }
   return next;
 }
@@ -72,4 +92,10 @@ export function updateAbsence(prev: AbsenceMap, observations: Map<string, Observ
 /** When the key may be imported (absent for SETTLE_MS), or null when it is not being observed absent. */
 export function settlesAt(entry: AbsenceEntry | undefined): Date | null {
   return entry ? new Date(Date.parse(entry.absentSince) + SETTLE_MS) : null;
+}
+
+/** Absent long enough: SETTLE_MS of wall-clock time AND MIN_ABSENT_OBSERVATIONS spaced observations. */
+export function isSettled(entry: AbsenceEntry | undefined, now: Date): boolean {
+  const at = settlesAt(entry);
+  return !!entry && !!at && at.getTime() <= now.getTime() && entry.count >= MIN_ABSENT_OBSERVATIONS;
 }
