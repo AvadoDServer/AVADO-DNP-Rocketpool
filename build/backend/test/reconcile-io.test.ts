@@ -291,6 +291,7 @@ test("end to end: imports into the chosen client from disk, never touches the ot
       ],
       keymanagerFor: (c) => createKeymanager({ baseUrl: c.id === "teku" ? teku.base : nimbus.base }),
       loadKeystore: (p, c) => loadKeystore(d, p, c),
+      readApproved: async () => ({ keys: new Set([pk("2"), pk("3")]) }),
       configuredClient: "teku",
       importAttempts: new Map(),
       trigger: "request",
@@ -339,6 +340,7 @@ test("loop: runs on the trigger file, removes it, writes the status file atomica
             throw new Error("unused");
           },
           loadKeystore: async () => ({ problem: "missing" }),
+          readApproved: async () => ({ keys: new Set<string>() }),
           configuredClient: undefined,
           importAttempts,
           trigger,

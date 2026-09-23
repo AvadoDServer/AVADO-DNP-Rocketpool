@@ -4,6 +4,7 @@ import { applyWalletGuards, readWalletState } from "../guards/wallet";
 import { HttpError, Limiter, parseParams, readBody, sendError, sendJson } from "../http-util";
 import type { Logger } from "../log";
 import { redact } from "../log";
+import { recordDepositKeys } from "../reconcile/api";
 import { lookupRoute } from "./allowlist";
 import { parseBigJson } from "./bigjson";
 import { readApiToken } from "./token";
@@ -127,6 +128,15 @@ export async function handleSmartnodeProxy(
       });
       status = upstream.status;
       const body = upstream.body;
+      // keys created by this node's own deposit may be loaded into the VC without asking
+      if (route === "node/deposit" && status === 200) {
+        try {
+          const n = await recordDepositKeys(config, body);
+          if (n > 0) logger.info(`node/deposit: ${n} new validator key(s) approved for loading`);
+        } catch (e) {
+          logger.error(`node/deposit: could not record the new validator keys as approved: ${String((e as Error)?.message ?? e)}`);
+        }
+      }
       if (!spec.secret && status >= 400) {
         const msg = (body as { error?: unknown })?.error;
         logger.warn(`smartnode ${route}: HTTP ${status}${typeof msg === "string" ? `: ${msg}` : ""}`);

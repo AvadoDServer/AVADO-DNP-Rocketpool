@@ -10,11 +10,11 @@
  * keys, which fee recipient), clients.ts (AVADO consensus-client packages), keymanager.ts,
  * keystores.ts, wamp.ts (DAPPMANAGER).
  */
-import { readFile, stat, writeFile } from "node:fs/promises";
 import type { Config } from "../config";
 import { HttpError } from "../http-util";
 import type { Logger } from "../log";
 import { SmartnodeClient } from "../sn/proxy";
+import { readApprovedKeys } from "./approved";
 import { listInstalledPackages } from "./clients";
 import { createKeymanager } from "./keymanager";
 import { loadKeystore } from "./keystores";
@@ -24,45 +24,14 @@ import { WampClient } from "./wamp";
 
 export type { ReconcileStatus } from "./run";
 export type { ReconcileLoop } from "./loop";
-
-export interface ReconcileStatusView {
-  /** false until the loop has written a status file. */
-  available: boolean;
-  /** A run was requested and has not been picked up yet. */
-  runRequested: boolean;
-  /** The status file's content as written by the loop (shape owned by Task 3). */
-  status?: unknown;
-  /** Status file modification time. */
-  updatedAt?: string;
-  error?: string;
-}
-
-export async function getReconcileStatus(config: Config): Promise<ReconcileStatusView> {
-  const runRequested = await stat(config.reconcileTriggerFile).then(
-    () => true,
-    () => false,
-  );
-  let raw: string;
-  let mtime: Date;
-  try {
-    [raw, mtime] = await Promise.all([
-      readFile(config.reconcileStatusFile, "utf8"),
-      stat(config.reconcileStatusFile).then((s) => s.mtime),
-    ]);
-  } catch {
-    return { available: false, runRequested };
-  }
-  try {
-    return { available: true, runRequested, status: JSON.parse(raw), updatedAt: mtime.toISOString() };
-  } catch {
-    return { available: false, runRequested, error: "The reconcile status file is not valid JSON" };
-  }
-}
-
-/** Asks the loop to run now by touching the trigger file. */
-export async function requestReconcileRun(config: Config): Promise<void> {
-  await writeFile(config.reconcileTriggerFile, new Date().toISOString() + "\n", { mode: 0o644 });
-}
+export {
+  APPROVE_CONFIRMATION,
+  approveKeysForLoading,
+  getReconcileStatus,
+  recordDepositKeys,
+  requestReconcileRun,
+  type ReconcileStatusView,
+} from "./api";
 
 /** Smartnode GET with the token injected; the error envelope and HTTP failures become an Error. */
 export function smartnodeReader(client: SmartnodeClient, timeoutMs: number): SmartnodeReader {
@@ -106,6 +75,7 @@ export function startReconcileLoop(config: Config, logger: Logger): ReconcileLoo
           listPackages: () => listInstalledPackages(wamp, 60_000),
           keymanagerFor: (client) => createKeymanager({ baseUrl: client.keymanagerUrl }),
           loadKeystore: (pubkey, client) => loadKeystore(config.dataDir, pubkey, client),
+          readApproved: () => readApprovedKeys(config.dataDir),
           configuredClient: config.consensusClient,
           importAttempts,
           trigger,

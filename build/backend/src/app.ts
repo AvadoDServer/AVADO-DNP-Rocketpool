@@ -4,9 +4,9 @@ import { getAvadoStatus } from "./avado/status";
 import type { Config } from "./config";
 import { checkCsrf, isSafeMethod } from "./csrf";
 import { isAllowedHost } from "./host";
-import { Limiter, sendError, sendJson } from "./http-util";
+import { HttpError, Limiter, readBody, sendError, sendJson } from "./http-util";
 import type { Logger } from "./log";
-import { getReconcileStatus, requestReconcileRun } from "./reconcile";
+import { approveKeysForLoading, getReconcileStatus, requestReconcileRun } from "./reconcile";
 import { handleSmartnodeProxy, SmartnodeClient, SN_PREFIX } from "./sn/proxy";
 import { handleStatic } from "./static";
 
@@ -38,6 +38,25 @@ export function createApp(config: Config, logger: Logger): RequestListener {
       await requestReconcileRun(config);
       logger.info("reconcile run requested");
       sendJson(res, 202, { status: "success", error: "", runRequested: true });
+    }),
+    "/api/avado/reconcile/approve": method("POST", async (req, res) => {
+      const type = (req.headers["content-type"] || "").split(";")[0]!.trim().toLowerCase();
+      if (type !== "application/json") return sendError(res, 415, "Use application/json");
+      let body: unknown;
+      try {
+        body = JSON.parse((await readBody(req)).toString("utf8"));
+      } catch (e) {
+        if (e instanceof HttpError) return sendError(res, e.statusCode, e.message);
+        return sendError(res, 400, "Invalid JSON body");
+      }
+      try {
+        const r = await approveKeysForLoading(config, body);
+        logger.info(`reconcile: owner approved ${r.approved} validator key(s) for loading (${r.added} new)`);
+        sendJson(res, 202, { status: "success", error: "", ...r, runRequested: true });
+      } catch (e) {
+        if (e instanceof HttpError) return sendError(res, e.statusCode, e.message);
+        throw e;
+      }
     }),
     "/api/avado/logs": method("GET", async (_req, res, query) => {
       const tail = parseTail(query.get("tail"));

@@ -83,6 +83,10 @@ export interface ClientSelection {
   installed: ClientInfo[];
   /** Installed packages that look like a validator client we do not know (mainnet only). */
   unknownValidatorPackages: string[];
+  /** How the client was chosen: the CONSENSUSCLIENT setting, or the only installed client. */
+  source: "setting" | "only-installed" | "none";
+  /** Plain-language explanation of the choice (or of why there is none). */
+  why: string;
   /** Why there is no chosen client. */
   reason?: string;
 }
@@ -110,23 +114,39 @@ export function selectClient(packages: InstalledPackage[], configured: string | 
   const configuredId = parseClientId(configured);
   if (configuredId) {
     const chosen = installed.find((c) => c.id === configuredId) ?? null;
-    if (chosen) return { chosen, installed, unknownValidatorPackages };
     const info = CLIENTS.find((c) => c.id === configuredId)!;
+    if (chosen) {
+      return {
+        chosen,
+        installed,
+        unknownValidatorPackages,
+        source: "setting",
+        why: `The Rocket Pool package setting CONSENSUSCLIENT is "${configuredId}".`,
+      };
+    }
+    const reason = `Rocket Pool is set to use ${info.name} (CONSENSUSCLIENT=${configuredId}), but the ${info.name} package (${info.packageName}) is not installed.`;
+    return { chosen: null, installed, unknownValidatorPackages, source: "none", why: reason, reason };
+  }
+  const unset = configured?.trim() ? `CONSENSUSCLIENT "${configured.trim()}" is not a known client` : "CONSENSUSCLIENT is not set";
+  if (installed.length === 1) {
     return {
-      chosen: null,
+      chosen: installed[0],
       installed,
       unknownValidatorPackages,
-      reason: `Rocket Pool is set to use ${info.name}, but the ${info.name} package (${info.packageName}) is not installed.`,
+      source: "only-installed",
+      why: `${unset}; ${installed[0].name} is the only installed consensus client.`,
     };
   }
-  if (installed.length === 1) return { chosen: installed[0], installed, unknownValidatorPackages };
+  const reason =
+    installed.length === 0
+      ? "No consensus client with a validator (Nimbus, Teku, Lighthouse or Prysm) is installed."
+      : `Several consensus clients are installed (${installed.map((c) => c.name).join(", ")}) and ${unset}.`;
   return {
     chosen: null,
     installed,
     unknownValidatorPackages,
-    reason:
-      installed.length === 0
-        ? "No consensus client with a validator (Nimbus, Teku, Lighthouse or Prysm) is installed."
-        : `Several consensus clients are installed (${installed.map((c) => c.name).join(", ")}) and none is selected for Rocket Pool.`,
+    source: "none",
+    why: reason,
+    reason,
   };
 }

@@ -6,14 +6,21 @@
  *  2. The node's Rocket Pool keys (node/status minipools, megapool/status validators) and
  *     each key's fee recipient (rules.ts).
  *  3. The installed consensus clients (DAPPMANAGER listPackages) and the chosen one.
- *  4. Import each Rocket Pool key that is missing in the chosen client, only when the key
- *     is not loaded in ANY installed AVADO consensus client. If any installed client's key
- *     list cannot be read, or an unknown validator package is installed, nothing is imported.
- *  5. Set the fee recipient of each Rocket Pool key loaded in the chosen client.
+ *  4. Import each Rocket Pool key that is missing in the chosen client, only when
+ *      - the key is on the "approved to load" list (approved.ts): created by this node
+ *        through the backend, or confirmed by the owner. Other missing keys are listed in
+ *        `awaitingApproval`; the owner may have moved those validators to another machine
+ *        on purpose, and loading them here too would get them slashed.
+ *      - the key is not loaded in ANY installed AVADO consensus client. If any installed
+ *        client's key list cannot be read, or an unknown validator package is installed,
+ *        nothing is imported.
+ *  5. Set the fee recipient of each Rocket Pool key loaded in the chosen client (approved
+ *     or not: a loaded key is never removed and always gets the right fee recipient).
  *
  * Never deletes a key, never touches a key that is not a Rocket Pool key of this node,
  * never throws: every failure ends up in the returned status.
  */
+import type { ApprovedRead } from "./approved";
 import type { ClientId, ClientInfo, InstalledPackage } from "./clients";
 import { selectClient } from "./clients";
 import { shortKey } from "./hex";
@@ -34,6 +41,7 @@ export type KeyState =
   | "loaded" // in the chosen client
   | "imported" // imported in this run
   | "elsewhere" // loaded in another consensus client: not imported
+  | "awaiting-approval" // missing, and not approved to load: the owner decides
   | "import-blocked" // not imported because not every client could be checked
   | "missing-keystore" // no keystore in the data dir
   | "import-failed"
@@ -71,7 +79,12 @@ export interface ReconcileStatus {
   trigger: "startup" | "timer" | "request";
   nextRunAt?: string;
   client: { id: ClientId; name: string; package: string } | null;
+  /** CONSENSUSCLIENT as set in the package. */
   configuredClient: string | null;
+  /** How the client was chosen, in plain language. */
+  clientChoice: { source: "setting" | "only-installed" | "none"; why: string } | null;
+  /** Rocket Pool keys missing in the client that wait for the owner's approval (96 hex, no 0x). */
+  awaitingApproval: string[];
   /** Other installed clients whose key lists were checked. */
   otherClients: Array<{ id: ClientId; name: string; package: string; checked: boolean; error?: string }>;
   unknownValidatorPackages: string[];
@@ -105,6 +118,8 @@ export interface RunDeps {
   listPackages(): Promise<InstalledPackage[]>;
   keymanagerFor(client: ClientInfo): Keymanager;
   loadKeystore(pubkey: string, client: ClientId): Promise<LoadedKeystore | KeystoreProblem>;
+  /** The "approved to load" list, read on every run. */
+  readApproved(): Promise<ApprovedRead>;
   /** CONSENSUSCLIENT from the package settings. */
   configuredClient: string | undefined;
   /** Failed import attempts per pubkey, kept by the loop between runs. */
@@ -132,6 +147,8 @@ export async function runReconcile(deps: RunDeps): Promise<ReconcileStatus> {
     trigger: deps.trigger,
     client: null,
     configuredClient: deps.configuredClient?.trim() || null,
+    clientChoice: null,
+    awaitingApproval: [],
     otherClients: [],
     unknownValidatorPackages: [],
     keys: { total: 0, inSync: 0, imported: 0, summary: "0/0" },
@@ -224,6 +241,7 @@ async function reconcile(
   }
   const sel = selectClient(packages, deps.configuredClient);
   status.unknownValidatorPackages = sel.unknownValidatorPackages;
+  status.clientChoice = { source: sel.source, why: sel.why };
   if (!sel.chosen) {
     status.errors.push(sel.reason ?? "No consensus client selected.");
     return finish(wanted.length === 0 ? "attention" : "error", sel.reason ?? "No consensus client selected.");
@@ -274,6 +292,15 @@ async function reconcile(
   }
 
   // 4. Imports
+  let approved: Set<string>;
+  try {
+    const a = await deps.readApproved();
+    approved = a.keys;
+    if (a.error) status.errors.push(a.error);
+  } catch (e) {
+    approved = new Set();
+    status.errors.push(`The approved-keys list could not be read: ${msgOf(e)}`);
+  }
   let importsThisRun = 0;
   let deferred = false;
   for (const v of status.validators) {
@@ -286,6 +313,18 @@ async function reconcile(
       v.state = "elsewhere";
       v.loadedIn = where;
       v.error = `Loaded in ${where}; not imported into ${chosen.name}.`;
+      continue;
+    }
+    if (!approved.has(v.pubkey)) {
+      // Only offer keys that could actually be loaded.
+      const ks = await deps.loadKeystore(v.pubkey, chosen.id);
+      if ("problem" in ks) {
+        v.state = "missing-keystore";
+        v.error = keystoreError(ks);
+      } else {
+        v.state = "awaiting-approval";
+        status.awaitingApproval.push(v.pubkey);
+      }
       continue;
     }
     if (blockReasons.length > 0) {
@@ -306,10 +345,7 @@ async function reconcile(
     const ks = await deps.loadKeystore(v.pubkey, chosen.id);
     if ("problem" in ks) {
       v.state = "missing-keystore";
-      v.error =
-        ks.problem === "missing"
-          ? "No keystore for this key in the Rocket Pool data folder."
-          : `The keystore for this key cannot be used (${ks.detail}).`;
+      v.error = keystoreError(ks);
       continue;
     }
     importsThisRun++;
@@ -370,11 +406,24 @@ async function reconcile(
   const allLoaded = status.keys.inSync === status.keys.total;
   const feeOk = status.feeRecipients.failed === 0 && status.validators.every((v) => v.feeRecipient.state !== "not-loaded");
   const summary = `Validator keys in sync with ${chosen.name}: ${status.keys.summary}.`;
+  const n = status.awaitingApproval.length;
+  if (n > 0) {
+    return finish(
+      "attention",
+      `${summary} ${n} validator key${n === 1 ? " is" : "s are"} not loaded and wait${n === 1 ? "s" : ""} for your approval.`,
+    );
+  }
   if (allLoaded && feeOk && status.errors.length === 0) {
     const fixed = status.feeRecipients.fixed ? ` Fee recipient corrected for ${status.feeRecipients.fixed}.` : "";
     return finish("ok", summary + fixed);
   }
   return finish("attention", summary + " Some keys need attention.");
+}
+
+function keystoreError(ks: KeystoreProblem): string {
+  return ks.problem === "missing"
+    ? "No keystore for this key in the Rocket Pool data folder."
+    : `The keystore for this key cannot be used (${ks.detail}).`;
 }
 
 function joinErr(a: string | undefined, b: string): string {

@@ -65,6 +65,9 @@ interface Fixture {
   packages: InstalledPackage[] | Error;
   kms: Partial<Record<ClientId, FakeKm>>;
   keystores: Set<string>;
+  /** The "approved to load" list. */
+  approved: Set<string>;
+  approvedError?: string;
   configured: string | undefined;
   snCalls: string[];
   wampCalls: number;
@@ -94,6 +97,7 @@ function fixture(o: Partial<Fixture> = {}): Fixture {
     packages: [{ name: PKG.teku, running: true }],
     kms: { teku: new FakeKm() },
     keystores: new Set([pk("1"), pk("2"), pk("3"), pk("4")]),
+    approved: new Set([pk("1"), pk("2"), pk("3"), pk("4")]),
     configured: "teku",
     snCalls: [],
     wampCalls: 0,
@@ -127,6 +131,7 @@ function deps(f: Fixture): RunDeps {
       if (!f.keystores.has(p)) return { problem: "missing" };
       return { layout: "teku", keystoreJson: JSON.stringify({ pubkey: p, crypto: {} }), password: `pw-${p[0]}` };
     },
+    readApproved: async () => ({ keys: new Set(f.approved), ...(f.approvedError ? { error: f.approvedError } : {}) }),
     configuredClient: f.configured,
     importAttempts: f.attempts,
     trigger: "timer",
@@ -408,4 +413,85 @@ test("a node with no validators is in sync (0/0)", async () => {
   const s = await runReconcile(deps(f));
   assert.equal(s.state, "ok");
   assert.equal(s.keys.summary, "0/0");
+});
+
+// ---------- Fix round 1: keys load only when approved ----------
+
+test("a missing key that is not approved is never imported; it waits for the owner", async () => {
+  const f = fixture({ approved: new Set() });
+  const teku = f.kms.teku!;
+  teku.keys.add(pk("1")); // loaded before (e.g. by the old wizard): kept and managed
+  const s = await runReconcile(deps(f));
+  assert.equal(teku.imported.length, 0);
+  assert.deepEqual(s.awaitingApproval, [pk("2")]);
+  const v2 = s.validators.find((v) => v.pubkey === pk("2"))!;
+  assert.equal(v2.state, "awaiting-approval");
+  assert.equal(s.state, "attention");
+  assert.match(s.message, /1 validator key is not loaded and waits for your approval/);
+  // the loaded key is not removed and its fee recipient is still corrected
+  assert.equal(s.validators.find((v) => v.pubkey === pk("1"))!.state, "loaded");
+  assert.equal(teku.fee.get(pk("1")), FD);
+  assert.equal(s.feeRecipients.fixed, 1);
+  assert.ok(!teku.calls.some((c) => c.startsWith("setfee:2")), "no fee recipient for a key that is not loaded");
+});
+
+test("approval is per key: approved keys load, the others wait", async () => {
+  const f = fixture({ approved: new Set([pk("2")]) });
+  (f.node as { minipools: unknown[] }).minipools.push({ address: "0xm3", validatorPubkey: pk("3"), status: { status: "Staking" } });
+  const s = await runReconcile(deps(f));
+  assert.deepEqual(f.kms.teku!.imported.map((i) => JSON.parse(i.keystoreJson).pubkey), [pk("2")]);
+  assert.deepEqual(s.awaitingApproval, [pk("1"), pk("3")]);
+  assert.match(s.message, /2 validator keys are not loaded and wait for your approval/);
+});
+
+test("keys without a keystore or loaded elsewhere are not offered for approval", async () => {
+  const nimbus = new FakeKm();
+  nimbus.keys.add(pk("2"));
+  const f = fixture({
+    approved: new Set(),
+    keystores: new Set([pk("2")]),
+    packages: [
+      { name: PKG.teku, running: true },
+      { name: PKG.nimbus, running: true },
+    ],
+    kms: { teku: new FakeKm(), nimbus },
+  });
+  const s = await runReconcile(deps(f));
+  assert.deepEqual(s.awaitingApproval, []);
+  assert.equal(s.validators.find((v) => v.pubkey === pk("1"))!.state, "missing-keystore");
+  assert.equal(s.validators.find((v) => v.pubkey === pk("2"))!.state, "elsewhere");
+});
+
+test("an approved key is still subject to the double-signing guard", async () => {
+  const prysm = new FakeKm();
+  prysm.failList = true;
+  const f = fixture({
+    packages: [
+      { name: PKG.teku, running: true },
+      { name: PKG.prysm, running: true },
+    ],
+    kms: { teku: new FakeKm(), prysm },
+  });
+  const s = await runReconcile(deps(f));
+  assert.equal(f.kms.teku!.imported.length, 0);
+  assert.ok(s.validators.every((v) => v.state === "import-blocked"));
+});
+
+test("an unreadable approved list approves nothing and is reported", async () => {
+  const f = fixture({ approved: new Set(), approvedError: ".avado-approved-keys.json is not valid; treating no key as approved" });
+  const s = await runReconcile(deps(f));
+  assert.equal(f.kms.teku!.imported.length, 0);
+  assert.ok(s.errors.some((e) => /not valid/.test(e)));
+});
+
+test("the status says which client was chosen and why", async () => {
+  const s1 = await runReconcile(deps(fixture()));
+  assert.deepEqual(s1.clientChoice, { source: "setting", why: 'The Rocket Pool package setting CONSENSUSCLIENT is "teku".' });
+  assert.equal(s1.configuredClient, "teku");
+  const s2 = await runReconcile(deps(fixture({ configured: undefined })));
+  assert.equal(s2.clientChoice!.source, "only-installed");
+  assert.match(s2.clientChoice!.why, /CONSENSUSCLIENT is not set; Teku is the only installed/);
+  const s3 = await runReconcile(deps(fixture({ configured: "lighthouse" })));
+  assert.equal(s3.clientChoice!.source, "none");
+  assert.match(s3.clientChoice!.why, /CONSENSUSCLIENT=lighthouse.*not installed/);
 });
