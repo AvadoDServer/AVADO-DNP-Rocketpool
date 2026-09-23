@@ -1,13 +1,10 @@
 import { stat } from "node:fs/promises";
 import path from "node:path";
-import { createWalletBackup, type WalletBackupResult } from "../backup";
 import { HttpError } from "../http-util";
 
 /** Routes that create or replace the node wallet. */
 export const WALLET_CHANGE_ROUTES = new Set(["wallet/init", "wallet/recover", "wallet/search-and-recover"]);
 
-/** Parameter the UI sends, after the owner confirmed, to replace an existing wallet. */
-export const REPLACE_PARAM = "replaceExisting";
 /** Parameter carrying the typed confirmation for wallet/export. */
 export const EXPORT_CONFIRM_PARAM = "typedConfirmation";
 /** What the owner has to type to export the wallet. */
@@ -53,50 +50,30 @@ export async function readWalletState(
 export interface GuardOutcome {
   /** Parameters to forward upstream (guard-only parameters removed). */
   params: Map<string, string>;
-  /** Set when a backup was made for this request. */
-  backup?: WalletBackupResult;
 }
+
+/** Shown when someone tries to create or restore a wallet on a node that has one. */
+export const WALLET_EXISTS_MESSAGE =
+  "This AVADO already has a Rocket Pool wallet. Contact support@ava.do if you need to change it.";
 
 /**
  * Runs the wallet guards for a write route. Throws HttpError to refuse.
- *  - wallet/init, wallet/recover, wallet/search-and-recover: refused (409) when a wallet
- *    exists, unless replaceExisting=true; then a fresh verified backup is made first,
- *    and a failed backup refuses the request (500).
+ *  - wallet/init, wallet/recover, wallet/search-and-recover: refused (409) whenever a
+ *    wallet exists. Replacing a wallet is not supported in this release; no code path
+ *    moves, overwrites or deletes the wallet or password files.
  *  - wallet/set-password: refused (409) when a password is already set.
  *  - wallet/export: needs typedConfirmation=EXPORT (400 otherwise).
  */
 export async function applyWalletGuards(
   route: string,
   params: Map<string, string>,
-  ctx: {
-    dataDir: string;
-    backupDir: string;
-    walletState: () => Promise<WalletState>;
-  },
+  ctx: { walletState: () => Promise<WalletState> },
 ): Promise<GuardOutcome> {
   const out = new Map(params);
   if (WALLET_CHANGE_ROUTES.has(route)) {
-    const replace = out.get(REPLACE_PARAM) === "true";
-    out.delete(REPLACE_PARAM);
     const state = await ctx.walletState();
-    if (!state.walletExists) return { params: out };
-    if (!replace) {
-      throw new HttpError(
-        409,
-        "A wallet already exists on this node. Replacing it needs an explicit confirmation (replaceExisting=true); a backup is made first.",
-      );
-    }
-    let backup: WalletBackupResult;
-    try {
-      backup = await createWalletBackup({
-        dataDir: ctx.dataDir,
-        backupDir: ctx.backupDir,
-        reason: "before-wallet-change",
-      });
-    } catch (err) {
-      throw new HttpError(500, `The wallet backup failed, so nothing was changed: ${(err as Error).message}`);
-    }
-    return { params: out, backup };
+    if (state.walletExists) throw new HttpError(409, WALLET_EXISTS_MESSAGE);
+    return { params: out };
   }
   if (route === "wallet/set-password") {
     const state = await ctx.walletState();

@@ -3,7 +3,7 @@ import { mkdir, symlink, writeFile } from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
 import { after, before, test } from "node:test";
-import { resolveStaticPath } from "../src/static";
+import { resolveStaticPath, UI_CSP } from "../src/static";
 import { startHarness, type Harness } from "./helpers";
 
 let h: Harness;
@@ -102,4 +102,17 @@ test("resolveStaticPath never leaves the root", () => {
   assert.equal(resolveStaticPath("/srv/ui", "/%2e%2e/%2e%2e/etc/passwd"), "/srv/ui/etc/passwd");
   assert.equal(resolveStaticPath("/srv/ui", "/a/..%2f..%2f..%2fetc"), "/srv/ui/etc");
   assert.equal(resolveStaticPath("/srv/ui", "/a/%00"), null);
+});
+
+test("UI responses carry the CSP with frame-ancestors for the AVADO admin and no X-Frame-Options", async () => {
+  assert.equal(
+    UI_CSP,
+    "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; " +
+      "font-src 'self'; script-src 'self'; frame-ancestors 'self' http://my.ava.do http://*.my.ava.do",
+  );
+  for (const p of ["/", "/minipools", "/assets/app-123.js", "/favicon.svg", "/nope.js"]) {
+    const r = await h.request("GET", p);
+    assert.equal(r.headers["content-security-policy"], UI_CSP, p);
+    assert.equal(r.headers["x-frame-options"], undefined, p);
+  }
 });

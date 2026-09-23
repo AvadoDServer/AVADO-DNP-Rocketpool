@@ -15,7 +15,7 @@ interface Upstream {
   body: unknown;
 }
 
-/** Serialises wallet-changing requests so two backups/replacements never interleave. */
+/** Serialises wallet requests so a guard check and the call it allows never interleave with another wallet change. */
 let walletLock: Promise<unknown> = Promise.resolve();
 function withWalletLock<T>(fn: () => Promise<T>): Promise<T> {
   const run = walletLock.then(fn, fn);
@@ -109,7 +109,6 @@ export async function handleSmartnodeProxy(
   const started = Date.now();
   let status = 500;
   try {
-    let backupName: string | undefined;
 
     const clientGone = new AbortController();
     // a GET (reads, /wait) is cancelled when the browser goes away; writes are left to finish
@@ -121,10 +120,7 @@ export async function handleSmartnodeProxy(
         signal: expected === "GET" ? clientGone.signal : undefined,
       });
       status = upstream.status;
-      let body = upstream.body;
-      if (backupName && body && typeof body === "object" && !Array.isArray(body)) {
-        body = { ...(body as Record<string, unknown>), avadoBackup: backupName };
-      }
+      const body = upstream.body;
       if (!spec.secret && status >= 400) {
         const msg = (body as { error?: unknown })?.error;
         logger.warn(`smartnode ${route}: HTTP ${status}${typeof msg === "string" ? `: ${msg}` : ""}`);
@@ -138,8 +134,6 @@ export async function handleSmartnodeProxy(
       if ([...query.keys()].length > 0) throw new HttpError(400, "Send parameters in the request body, not the URL");
       const raw = parseParams(req.headers["content-type"], await readBody(req));
       const guardCtx = {
-        dataDir: config.dataDir,
-        backupDir: config.backupDir,
         walletState: () =>
           readWalletState(config.dataDir, async () => {
             const r = await client.call("wallet/status", "GET", new URLSearchParams(), { timeoutMs: 10_000 });
@@ -148,10 +142,6 @@ export async function handleSmartnodeProxy(
       };
       const run = async () => {
         const outcome = await applyWalletGuards(route, raw, guardCtx);
-        if (outcome.backup) {
-          backupName = outcome.backup.name;
-          logger.info(`wallet backup created before ${route}: ${outcome.backup.name}`);
-        }
         await forward(toSearchParams(outcome.params));
       };
       if (route.startsWith("wallet/")) await withWalletLock(run);

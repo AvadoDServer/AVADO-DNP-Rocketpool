@@ -3,6 +3,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { after, beforeEach, test } from "node:test";
 import { createWalletBackup } from "../src/backup";
+import { WALLET_EXISTS_MESSAGE } from "../src/guards/wallet";
 import { startHarness, type Harness } from "./helpers";
 
 let h: Harness | undefined;
@@ -40,6 +41,7 @@ for (const route of ["wallet/init", "wallet/recover", "wallet/search-and-recover
     await seedWallet(h!.config.dataDir);
     const r = await h!.post(`/api/sn/${route}`, { mnemonic: MNEMONIC });
     assert.equal(r.status, 409);
+    assert.equal(r.json.error, WALLET_EXISTS_MESSAGE);
     assert.equal(walletCalls(h!, `/api/${route}`).length, 0);
   });
 
@@ -58,39 +60,20 @@ test("with no wallet, wallet/init is forwarded and its response is not logged", 
   assert.ok(!h!.logs.join("\n").includes("legal winner"), "mnemonic logged");
 });
 
-test("replaceExisting=true makes a verified backup first, then forwards without the flag", async () => {
+test("replaceExisting=true does not bypass the guard; wallet files are never touched", async () => {
   const d = h!.config.dataDir;
   await seedWallet(d);
-  const r = await h!.post("/api/sn/wallet/recover", {
-    mnemonic: MNEMONIC,
-    skipValidatorKeyRecovery: "false",
-    replaceExisting: true,
-  });
-  assert.equal(r.status, 200);
-  assert.match(r.json.avadoBackup, /^\d{8}T\d{6}Z-before-wallet-change$/);
-  const bdir = path.join(h!.config.backupDir, r.json.avadoBackup);
-  assert.equal(await readFile(path.join(bdir, "wallet"), "utf8"), '{"crypto":"original-wallet"}');
-  assert.equal(await readFile(path.join(bdir, "password"), "utf8"), "original-password");
-  assert.equal(await readFile(path.join(bdir, "validators", "teku", "keys", "0xabc.json"), "utf8"), '{"k":1}');
-  // originals untouched
+  for (const route of ["wallet/init", "wallet/recover", "wallet/search-and-recover"]) {
+    const r = await h!.post(`/api/sn/${route}`, { mnemonic: MNEMONIC, replaceExisting: true });
+    assert.equal(r.status, 409, route);
+    assert.equal(r.json.error, WALLET_EXISTS_MESSAGE);
+    assert.equal(walletCalls(h!, `/api/${route}`).length, 0, route);
+  }
   assert.equal(await readFile(path.join(d, "wallet"), "utf8"), '{"crypto":"original-wallet"}');
   assert.equal(await readFile(path.join(d, "password"), "utf8"), "original-password");
-  const fwd = walletCalls(h!, "/api/wallet/recover");
-  assert.equal(fwd.length, 1);
-  assert.ok(!fwd[0]!.body.includes("replaceExisting"));
-  assert.ok(fwd[0]!.body.includes("skipValidatorKeyRecovery=false"));
+  // no backup made, nothing moved
+  await assert.rejects(readdir(h!.config.backupDir));
   assert.ok(!h!.logs.join("\n").includes("legal winner"), "mnemonic logged");
-});
-
-test("replaceExisting=true with a failing backup refuses and forwards nothing", async () => {
-  await seedWallet(h!.config.dataDir);
-  // make the backup dir unusable: a file where the directory should be
-  await mkdir(path.dirname(h!.config.backupDir), { recursive: true });
-  await writeFile(h!.config.backupDir, "not a dir");
-  const r = await h!.post("/api/sn/wallet/recover", { mnemonic: MNEMONIC, replaceExisting: "true" });
-  assert.equal(r.status, 500);
-  assert.match(r.json.error, /backup failed/);
-  assert.equal(walletCalls(h!, "/api/wallet/recover").length, 0);
 });
 
 test("wallet/set-password is refused when a password file exists", async () => {

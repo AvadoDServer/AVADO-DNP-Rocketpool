@@ -24,8 +24,27 @@ const MIME: Record<string, string> = {
   ".txt": "text/plain; charset=utf-8",
 };
 
+/**
+ * CSP for every UI response. frame-ancestors lets only the AVADO admin (my.ava.do)
+ * embed the UI, which protects the confirm buttons from clickjacking; X-Frame-Options
+ * is deliberately not sent (it cannot express this list, and CSP takes precedence).
+ */
+export const UI_CSP = [
+  "default-src 'self'",
+  "connect-src 'self'",
+  "img-src 'self' data:",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self'",
+  "script-src 'self'",
+  "frame-ancestors 'self' http://my.ava.do http://*.my.ava.do",
+].join("; ");
+
 function plain(res: ServerResponse, code: number, text: string): void {
-  res.writeHead(code, { "Content-Type": "text/plain; charset=utf-8", "X-Content-Type-Options": "nosniff" });
+  res.writeHead(code, {
+    "Content-Type": "text/plain; charset=utf-8",
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": UI_CSP,
+  });
   res.end(text);
 }
 
@@ -66,6 +85,7 @@ async function serveFile(req: IncomingMessage, res: ServerResponse, file: string
     "Cache-Control": cache,
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "same-origin",
+    "Content-Security-Policy": UI_CSP,
   });
   if (req.method === "HEAD") {
     res.end();
