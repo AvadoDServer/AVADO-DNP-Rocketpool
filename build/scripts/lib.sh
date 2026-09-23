@@ -11,6 +11,7 @@ BACKUP_ROOT="${BACKUP_ROOT:-/rocketpool/backups}"
 BACKUP_KEEP="${BACKUP_KEEP:-3}"
 STATUS_FILE="${STATUS_FILE:-/tmp/avado-start-status.json}"
 VERSION_MARKER="${VERSION_MARKER:-${DATA_DIR}/.avado-package-version}"
+FINGERPRINT_FILE="${FINGERPRINT_FILE:-${DATA_DIR}/.avado-backup-fingerprint}"
 TEMPLATE_FILE="${TEMPLATE_FILE:-${RP_DIR}/user-settings.template}"
 SETTINGS_FILE="${SETTINGS_FILE:-${RP_DIR}/user-settings.yml}"
 RP_BIN="${RP_BIN:-/usr/local/bin/rocketpoold}"
@@ -20,7 +21,7 @@ RP_BIN="${RP_BIN:-/usr/local/bin/rocketpoold}"
 EX_CONFIG=78
 
 # Items in the data dir that the upgrade backup copies (if present).
-BACKUP_DATA_ITEMS=(wallet password validators mnemonic transactions.json)
+BACKUP_DATA_ITEMS=(wallet password address validators custom-keys custom-key-passwords mnemonic transactions.json)
 # Settings files the previous package version rendered. They live in the
 # container filesystem, so they only exist when the same container restarts.
 BACKUP_SETTINGS_ITEMS=("${RP_DIR}/user-settings.yml" "${RP_DIR}/settings.json")
@@ -40,7 +41,8 @@ json_escape() {
 }
 
 # write_status <state> <message> [backup_path]
-# States: starting | unsupported_config | backup_failed | config_error
+# States: starting | unsupported_config | backup_failed | config_error |
+#         config_check_retry (preflight timed out, retrying; daemon not started yet)
 # Read by the backend (GET /api/avado/status). Never contains secrets.
 write_status() {
     local state="$1" message="$2" backup="${3:-}"
@@ -136,6 +138,9 @@ render_settings() {
 # disabled. The daemon prints "Starting node daemon in Native Mode." right
 # after the config loaded; then it can only wait for the (unreachable) EL, so
 # it cannot touch the wallet or send anything. Sets PREFLIGHT_OUTPUT.
+# Returns 0 when the config loaded, 1 when the daemon exited without loading
+# it (rejected), 2 when it was still running after $PREFLIGHT_TIMEOUT
+# seconds without printing either (slow box: retry, don't give up).
 config_preflight() {
     local dir
     dir="$(mktemp -d /tmp/rp-preflight.XXXXXX)" || return 1
@@ -157,6 +162,13 @@ config_preflight() {
         kill -0 "$pid" 2>/dev/null || break
         sleep 1
     done
+    if [ "$ok" -ne 0 ]; then
+        if grep -q "Starting node daemon in Native Mode." "$dir/out.log"; then
+            ok=0
+        elif kill -0 "$pid" 2>/dev/null; then
+            ok=2
+        fi
+    fi
     kill "$pid" 2>/dev/null
     wait "$pid" 2>/dev/null
     PREFLIGHT_OUTPUT="$(head -c 4000 "$dir/out.log")"
@@ -164,43 +176,97 @@ config_preflight() {
     return $ok
 }
 
+# Version strings: the same charset the Dockerfile accepts for the manifest
+# version.
+VERSION_CHARS='A-Za-z0-9._+-'
+
 backup_name_ok() {
-    [[ "$1" =~ ^[A-Za-z0-9._-]+-[0-9]{8}T[0-9]{6}Z$ ]]
+    [[ "$1" =~ ^[A-Za-z0-9._+-]+-[0-9]{8}T[0-9]{6}Z$ ]]
 }
 
-# Removes backups beyond the newest $BACKUP_KEEP. Only touches directories in
-# $BACKUP_ROOT whose name matches <label>-<UTC timestamp>.
+# True if $1 is a directory this script created: <version>-<UTC timestamp>,
+# not a symlink, with a regular backup-info.json of kind "package-upgrade".
+# Everything else in $BACKUP_ROOT (e.g. the backend's
+# <ts>-before-wallet-change or mnemonic-archive-<ts>) is never pruned.
+is_upgrade_backup() {
+    local path="$BACKUP_ROOT/$1"
+    backup_name_ok "$1" && [ -d "$path" ] && [ ! -L "$path" ] &&
+        [ -f "$path/backup-info.json" ] && [ ! -L "$path/backup-info.json" ] &&
+        grep -q '"kind": "package-upgrade"' "$path/backup-info.json"
+}
+
+# prune_backups <just_created_name>
+# Keeps the backup just created (whatever its timestamp, so a clock that is
+# behind can't remove it) plus the newest $BACKUP_KEEP-1 other upgrade
+# backups, and removes older upgrade backups.
 prune_backups() {
-    local names=() name path
+    local keep_name="$1" names=() name path
     for path in "$BACKUP_ROOT"/*; do
         name="${path##*/}"
-        # Never follow or delete anything that is not our own backup dir.
-        backup_name_ok "$name" && [ -d "$path" ] && [ ! -L "$path" ] && names+=("$name")
+        [ "$name" = "$keep_name" ] && continue
+        is_upgrade_backup "$name" && names+=("$name")
     done
-    [ "${#names[@]}" -le "$BACKUP_KEEP" ] && return 0
+    local keep_others=$((BACKUP_KEEP - 1))
+    [ "${#names[@]}" -le "$keep_others" ] && return 0
     # Sort by the timestamp suffix, newest first.
     local sorted
     sorted="$(for name in "${names[@]}"; do echo "${name##*-} $name"; done | sort -r | awk '{print $2}')"
     local n=0
     for name in $sorted; do
         n=$((n + 1))
-        if [ "$n" -gt "$BACKUP_KEEP" ]; then
+        if [ "$n" -gt "$keep_others" ]; then
             log "Removing old backup $name"
             rm -rf -- "${BACKUP_ROOT:?}/$name"
         fi
     done
 }
 
-# Backs up the wallet, keys and settings when the package version changed.
-# Sets BACKUP_PATH (empty when no backup was needed). Returns 1 on any
-# failure; the version marker is then not written.
+# Removes .partial-* directories (interrupted backups, e.g. power loss during
+# the copy) older than 1 hour. Never follows symlinks.
+clean_stale_partials() {
+    [ -d "$BACKUP_ROOT" ] || return 0
+    find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -name '.partial-*' -mmin +60 -print0 2>/dev/null |
+        while IFS= read -r -d '' path; do
+            log "Removing interrupted backup ${path##*/}"
+            rm -rf -- "$path"
+        done
+}
+
+# Fingerprint of the node identity files (wallet, password, address). Stored
+# next to the version marker; a change while the version is the same (e.g. a
+# rollback to 0.0.106, a new wallet there, then this version again) makes a
+# new backup.
+data_fingerprint() {
+    local f
+    for f in wallet password address; do
+        if [ -f "$DATA_DIR/$f" ]; then
+            printf '%s %s\n' "$f" "$(sha256sum <"$DATA_DIR/$f" | cut -d' ' -f1)"
+        else
+            printf '%s none\n' "$f"
+        fi
+    done | sha256sum | cut -d' ' -f1
+}
+
+# Backs up the wallet, keys and settings when the package version changed,
+# or when the version is the same but the wallet/password/address changed
+# since the last start. Sets BACKUP_PATH (empty when no backup was needed).
+# Returns 1 on any failure; the markers are then not written.
 backup_if_needed() {
     BACKUP_PATH=""
-    local old=""
-    [ -f "$VERSION_MARKER" ] && old="$(head -n1 "$VERSION_MARKER" | tr -cd 'A-Za-z0-9._-')"
+    clean_stale_partials
+
+    local old="" old_fp="" fp reason
+    [ -f "$VERSION_MARKER" ] && old="$(head -n1 "$VERSION_MARKER" | tr -cd "$VERSION_CHARS")"
+    [ -f "$FINGERPRINT_FILE" ] && old_fp="$(head -n1 "$FINGERPRINT_FILE" | tr -cd '0-9a-f')"
+    fp="$(data_fingerprint)" || return 1
     if [ -n "$old" ] && [ "$old" = "$PACKAGE_VERSION" ]; then
-        log "Package version $PACKAGE_VERSION unchanged, no backup needed"
-        return 0
+        if [ "$old_fp" = "$fp" ]; then
+            log "Package version $PACKAGE_VERSION and wallet unchanged, no backup needed"
+            return 0
+        fi
+        reason="wallet-changed"
+    else
+        reason="version-changed"
     fi
     local label="${old:-legacy}"
 
@@ -220,7 +286,11 @@ backup_if_needed() {
         local name="${label}-${ts}"
         local dest="$BACKUP_ROOT/$name"
         local tmp="$BACKUP_ROOT/.partial-$name"
-        log "Package version changed (${old:-none} -> $PACKAGE_VERSION): backing up to $dest"
+        if [ "$reason" = "wallet-changed" ]; then
+            log "Wallet files changed since the last start of $PACKAGE_VERSION: backing up to $dest"
+        else
+            log "Package version changed (${old:-none} -> $PACKAGE_VERSION): backing up to $dest"
+        fi
 
         mkdir -p "$BACKUP_ROOT" && chmod 700 "$BACKUP_ROOT" || return 1
         if [ -e "$dest" ]; then
@@ -248,8 +318,8 @@ backup_if_needed() {
             done
         fi
         if ! {
-            printf '{\n  "fromVersion": "%s",\n  "toVersion": "%s",\n  "createdAt": "%s",\n  "items": [' \
-                "$(json_escape "${old:-}")" "$(json_escape "$PACKAGE_VERSION")" "$ts"
+            printf '{\n  "kind": "package-upgrade",\n  "reason": "%s",\n  "fromVersion": "%s",\n  "toVersion": "%s",\n  "createdAt": "%s",\n  "items": [' \
+                "$reason" "$(json_escape "${old:-}")" "$(json_escape "$PACKAGE_VERSION")" "$ts"
             local first=1
             for item in "${data_items[@]}"; do
                 [ $first -eq 1 ] && first=0 || printf ','
@@ -267,10 +337,11 @@ backup_if_needed() {
         sync
         mv -- "$tmp" "$dest" || { rm -rf -- "$tmp"; return 1; }
         BACKUP_PATH="$dest"
-        prune_backups
+        prune_backups "$name"
     fi
 
-    # Only now record the new version.
+    # Only now record the new version and fingerprint.
     printf '%s\n' "$PACKAGE_VERSION" >"${VERSION_MARKER}.tmp" && mv -f "${VERSION_MARKER}.tmp" "$VERSION_MARKER" || return 1
+    printf '%s\n' "$fp" >"${FINGERPRINT_FILE}.tmp" && mv -f "${FINGERPRINT_FILE}.tmp" "$FINGERPRINT_FILE" || return 1
     return 0
 }

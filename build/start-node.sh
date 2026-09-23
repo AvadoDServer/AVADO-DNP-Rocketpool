@@ -74,11 +74,26 @@ if ! render_settings "$SETTINGS_FILE" "$DATA_DIR" "$EC_HTTP_URL" "$CC_HTTP_URL" 
     stop_with config_error "Could not write $SETTINGS_FILE."
 fi
 
-if ! config_preflight; then
+# Config check. A rejection stops the daemon; a timeout (slow box) is retried
+# with backoff while the startup-error file tells the UI what is going on.
+backoff="${PREFLIGHT_BACKOFF_START:-30}"
+while :; do
+    config_preflight
+    rc=$?
+    [ "$rc" -eq 0 ] && break
     log "Config preflight output:"
     printf '%s\n' "$PREFLIGHT_OUTPUT"
-    stop_with config_error "Smartnode v$SMARTNODE_VERSION did not accept the generated settings: $(printf '%s' "$PREFLIGHT_OUTPUT" | grep -v '^$' | tail -n 3)"
-fi
+    if [ "$rc" -ne 2 ]; then
+        stop_with config_error "Smartnode v$SMARTNODE_VERSION did not accept the generated settings: $(printf '%s' "$PREFLIGHT_OUTPUT" | grep -v '^$' | tail -n 3)"
+    fi
+    msg="Checking the Smartnode settings timed out (the box may be busy). Retrying in ${backoff}s."
+    log "$msg"
+    printf '%s\n' "$msg" >"$STARTUP_ERROR_FILE"
+    write_status config_check_retry "$msg" "$BACKUP_PATH"
+    sleep "$backoff"
+    backoff=$((backoff * 2))
+    [ "$backoff" -gt "${PREFLIGHT_BACKOFF_MAX:-300}" ] && backoff="${PREFLIGHT_BACKOFF_MAX:-300}"
+done
 log "Settings accepted by Smartnode v$SMARTNODE_VERSION"
 
 mkdir -p "$DATA_DIR/rewards-trees"
