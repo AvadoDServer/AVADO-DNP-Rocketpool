@@ -195,18 +195,29 @@ is_upgrade_backup() {
         grep -q '"kind": "package-upgrade"' "$path/backup-info.json"
 }
 
+# True if the upgrade backup $1 is marked "keepForever": true (the first
+# backup, taken from the pre-1.0 install). Such backups are never pruned and
+# do not count toward $BACKUP_KEEP.
+is_keep_forever() {
+    grep -q '"keepForever": true' "$BACKUP_ROOT/$1/backup-info.json" 2>/dev/null
+}
+
 # prune_backups <just_created_name>
-# Keeps the backup just created (whatever its timestamp, so a clock that is
-# behind can't remove it) plus the newest $BACKUP_KEEP-1 other upgrade
-# backups, and removes older upgrade backups.
+# Keeps every keepForever backup, the backup just created (whatever its
+# timestamp, so a clock that is behind can't remove it), and the newest other
+# upgrade backups up to $BACKUP_KEEP in total (keepForever not counted);
+# removes older upgrade backups.
 prune_backups() {
     local keep_name="$1" names=() name path
     for path in "$BACKUP_ROOT"/*; do
         name="${path##*/}"
         [ "$name" = "$keep_name" ] && continue
-        is_upgrade_backup "$name" && names+=("$name")
+        is_upgrade_backup "$name" || continue
+        is_keep_forever "$name" && continue
+        names+=("$name")
     done
     local keep_others=$((BACKUP_KEEP - 1))
+    is_keep_forever "$keep_name" && keep_others=$BACKUP_KEEP
     [ "${#names[@]}" -le "$keep_others" ] && return 0
     # Sort by the timestamp suffix, newest first.
     local sorted
@@ -219,6 +230,15 @@ prune_backups() {
             rm -rf -- "${BACKUP_ROOT:?}/$name"
         fi
     done
+}
+
+# True if any package-upgrade backup exists.
+has_upgrade_backup() {
+    local path
+    for path in "$BACKUP_ROOT"/*; do
+        is_upgrade_backup "${path##*/}" && return 0
+    done
+    return 1
 }
 
 # Removes .partial-* directories (interrupted backups, e.g. power loss during
@@ -317,9 +337,16 @@ backup_if_needed() {
                 fi
             done
         fi
+        # The first upgrade backup (from a pre-1.0 install, or the first one
+        # made at all) is kept forever.
+        local keep_forever=false
+        if ! has_upgrade_backup ||
+            { [ "$reason" = "version-changed" ] && { [ -z "$old" ] || [ "${old%%.*}" = "0" ]; }; }; then
+            keep_forever=true
+        fi
         if ! {
-            printf '{\n  "kind": "package-upgrade",\n  "reason": "%s",\n  "fromVersion": "%s",\n  "toVersion": "%s",\n  "createdAt": "%s",\n  "items": [' \
-                "$reason" "$(json_escape "${old:-}")" "$(json_escape "$PACKAGE_VERSION")" "$ts"
+            printf '{\n  "kind": "package-upgrade",\n  "keepForever": %s,\n  "reason": "%s",\n  "fromVersion": "%s",\n  "toVersion": "%s",\n  "createdAt": "%s",\n  "items": [' \
+                "$keep_forever" "$reason" "$(json_escape "${old:-}")" "$(json_escape "$PACKAGE_VERSION")" "$ts"
             local first=1
             for item in "${data_items[@]}"; do
                 [ $first -eq 1 ] && first=0 || printf ','

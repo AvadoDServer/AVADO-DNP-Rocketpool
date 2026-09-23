@@ -205,7 +205,9 @@ for i in 1 2 3 4; do
     PACKAGE_VERSION="1.0.$i" AVADO_NOW="2026100${i}T120000Z" lib 'backup_if_needed'
 done
 names="$(ls "$BACKUP_ROOT" | LC_ALL=C sort | tr '\n' ' ')"
-assert_eq "$names" "1.0.1-20261002T120000Z 1.0.2-20261003T120000Z 1.0.3-20261004T120000Z "
+# legacy-* (from a pre-1.0 install) and 0.0.107-test-* (previous version < 1.0.0)
+# are keepForever; of the rest the newest 3 are kept.
+assert_eq "$names" "0.0.107-test-20261001T120000Z 1.0.1-20261002T120000Z 1.0.2-20261003T120000Z 1.0.3-20261004T120000Z legacy-20260923T100000Z "
 assert_eq "$(cat "$VERSION_MARKER")" "1.0.4"
 assert_eq "$(tree_sum "$DATA_DIR")" "$before" "(data dir modified)"
 
@@ -245,20 +247,21 @@ assert_file "$BACKUP_ROOT/mnemonic-archive-20200101T000000Z/content"
 assert_file "$BACKUP_ROOT/20200101T000000Z-before-wallet-change/content"
 assert_file "$BACKUP_ROOT/0.0.50-20200101T000000Z/content"
 upgrades="$(for d in "$BACKUP_ROOT"/*; do [ -f "$d/backup-info.json" ] && grep -q '"kind": "package-upgrade"' "$d/backup-info.json" && basename "$d"; done | LC_ALL=C sort | tr '\n' ' ')"
-assert_eq "$upgrades" "2.0.2-20261103T120000Z 2.0.3-20261104T120000Z 2.0.4-20261105T120000Z "
+assert_eq "$upgrades" "2.0.2-20261103T120000Z 2.0.3-20261104T120000Z 2.0.4-20261105T120000Z legacy-20261101T120000Z "
 
 t "backup (I1): the backup just made survives pruning when the clock is behind"
 new_sandbox skew
-for i in 7 8 9; do
-    PACKAGE_VERSION="0.0.10$i" AVADO_NOW="2027010${i}T000000Z" lib 'backup_if_needed' >/dev/null
+for i in 6 7 8 9; do
+    PACKAGE_VERSION="1.0.$i" AVADO_NOW="2027010${i}T000000Z" lib 'backup_if_needed' >/dev/null
 done
-PACKAGE_VERSION="1.0.0" AVADO_NOW="20260101T000000Z" lib 'backup_if_needed && echo "RESULT=$BACKUP_PATH"' | sed -n 's/^RESULT=//p' >"$SB/res"
-assert_eq "$(cat "$SB/res")" "$BACKUP_ROOT/0.0.109-20260101T000000Z"
-assert_file "$BACKUP_ROOT/0.0.109-20260101T000000Z/wallet"
-assert_eq "$(ls "$BACKUP_ROOT" | wc -l | tr -d ' ')" "3"
-assert_file "$BACKUP_ROOT/0.0.108-20270109T000000Z"
-assert_file "$BACKUP_ROOT/0.0.107-20270108T000000Z"
-assert_no_file "$BACKUP_ROOT/legacy-20270107T000000Z"
+PACKAGE_VERSION="1.1.0" AVADO_NOW="20260101T000000Z" lib 'backup_if_needed && echo "RESULT=$BACKUP_PATH"' | sed -n 's/^RESULT=//p' >"$SB/res"
+assert_eq "$(cat "$SB/res")" "$BACKUP_ROOT/1.0.9-20260101T000000Z"
+assert_file "$BACKUP_ROOT/1.0.9-20260101T000000Z/wallet"
+assert_file "$BACKUP_ROOT/legacy-20270106T000000Z" "(keepForever)"
+assert_file "$BACKUP_ROOT/1.0.8-20270109T000000Z"
+assert_file "$BACKUP_ROOT/1.0.7-20270108T000000Z"
+assert_no_file "$BACKUP_ROOT/1.0.6-20270107T000000Z"
+assert_eq "$(ls "$BACKUP_ROOT" | wc -l | tr -d ' ')" "4"
 
 t "backup (M1): same version but a changed wallet (rollback, new wallet, reinstall) makes a new backup"
 new_sandbox rollback
@@ -297,6 +300,32 @@ PACKAGE_VERSION=1.0.0 lib 'backup_if_needed' >/dev/null
 assert_no_file "$BACKUP_ROOT/.partial-1.0.0-20260101T000000Z"
 assert_file "$BACKUP_ROOT/.partial-1.0.0-20260102T000000Z"
 assert_file "$SB/outside/precious"
+
+
+t "backup: the first backup from the pre-1.0 install is kept forever"
+new_sandbox forever
+echo "0.0.106" >"$VERSION_MARKER"
+PACKAGE_VERSION=1.0.0 AVADO_NOW=20261201T000000Z lib 'backup_if_needed' >/dev/null
+F="$BACKUP_ROOT/0.0.106-20261201T000000Z"
+assert_contains "$F/backup-info.json" '"keepForever": true'
+# Six wallet changes under 1.0.0 (fingerprint-triggered backups), then an upgrade.
+for i in 2 3 4 5 6 7; do
+    printf '{"crypto":"wallet-%s"}' "$i" >"$DATA_DIR/wallet"
+    PACKAGE_VERSION=1.0.0 AVADO_NOW="2026120${i}T000000Z" lib 'backup_if_needed' >/dev/null
+done
+PACKAGE_VERSION=1.0.1 AVADO_NOW=20261208T000000Z lib 'backup_if_needed' >/dev/null
+assert_file "$F/wallet"
+assert_eq "$(cat "$F/wallet")" '{"crypto":"fixture-wallet"}'
+others="$(ls "$BACKUP_ROOT" | grep -v '^0.0.106-' | LC_ALL=C sort | tr '\n' ' ')"
+assert_eq "$others" "1.0.0-20261206T000000Z 1.0.0-20261207T000000Z 1.0.0-20261208T000000Z "
+assert_contains "$BACKUP_ROOT/1.0.0-20261208T000000Z/backup-info.json" '"keepForever": false'
+assert_contains "$BACKUP_ROOT/1.0.0-20261207T000000Z/backup-info.json" '"keepForever": false'
+
+t "backup: keepForever is also set when no other upgrade backup exists (1.x -> 1.y first run)"
+new_sandbox forever2
+echo "1.0.0" >"$VERSION_MARKER"
+PACKAGE_VERSION=1.0.1 AVADO_NOW=20261201T000000Z lib 'backup_if_needed' >/dev/null
+assert_contains "$BACKUP_ROOT/1.0.0-20261201T000000Z/backup-info.json" '"keepForever": true'
 
 t "backup: new install with an empty data dir writes only the marker"
 new_sandbox fresh
