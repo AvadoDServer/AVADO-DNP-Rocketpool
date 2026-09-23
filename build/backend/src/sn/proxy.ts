@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Config } from "../config";
 import { applyWalletGuards, readWalletState } from "../guards/wallet";
-import { HttpError, parseParams, readBody, sendError, sendJson } from "../http-util";
+import { HttpError, Limiter, parseParams, readBody, sendError, sendJson } from "../http-util";
 import type { Logger } from "../log";
 import { redact } from "../log";
 import { lookupRoute } from "./allowlist";
@@ -93,9 +93,9 @@ export async function handleSmartnodeProxy(
   res: ServerResponse,
   pathname: string,
   query: URLSearchParams,
-  deps: { config: Config; logger: Logger; client: SmartnodeClient },
+  deps: { config: Config; logger: Logger; client: SmartnodeClient; longLimiter: Limiter },
 ): Promise<void> {
-  const { config, logger, client } = deps;
+  const { config, logger, client, longLimiter } = deps;
   const route = pathname.slice(SN_PREFIX.length);
   const spec = lookupRoute(route);
   if (!spec) return sendError(res, 404, "Unknown API route");
@@ -104,6 +104,12 @@ export async function handleSmartnodeProxy(
   if (req.method !== expected) {
     res.setHeader("Allow", expected);
     return sendError(res, 405, `Use ${expected} for this route`);
+  }
+
+  // bound the number of requests that may hold an upstream call open for up to an hour
+  if (spec.long && !longLimiter.try()) {
+    logger.warn(`${req.method} ${SN_PREFIX}${route} refused: too many long-running requests`);
+    return sendError(res, 429, "Too many long-running requests at once. Please try again shortly.");
   }
 
   const started = Date.now();
@@ -157,6 +163,7 @@ export async function handleSmartnodeProxy(
       if (!res.headersSent) sendError(res, 500, "Internal error");
     }
   } finally {
+    if (spec.long) longLimiter.release();
     // one line per call: method, route and status only (never query, body or headers)
     logger.info(`${req.method} ${SN_PREFIX}${route} ${status} ${Date.now() - started}ms`);
   }

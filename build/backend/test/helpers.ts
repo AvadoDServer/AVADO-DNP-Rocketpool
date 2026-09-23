@@ -19,7 +19,8 @@ export interface UpstreamCall {
   contentType: string | undefined;
 }
 
-export type UpstreamHandler = (call: UpstreamCall) => { status?: number; body: string; headers?: Record<string, string> };
+export type UpstreamReply = { status?: number; body: string; headers?: Record<string, string> };
+export type UpstreamHandler = (call: UpstreamCall) => UpstreamReply | Promise<UpstreamReply>;
 
 export interface Harness {
   config: Config;
@@ -61,7 +62,7 @@ export async function startHarness(env: Record<string, string> = {}): Promise<Ha
   const upstream = http.createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
-    req.on("end", () => {
+    req.on("end", async () => {
       const u = new URL(req.url ?? "/", "http://x");
       const call: UpstreamCall = {
         method: req.method ?? "",
@@ -72,7 +73,8 @@ export async function startHarness(env: Record<string, string> = {}): Promise<Ha
         contentType: req.headers["content-type"],
       };
       calls.push(call);
-      const out = handler(call);
+      const out = await handler(call);
+      if (res.destroyed) return;
       res.writeHead(out.status ?? 200, { "Content-Type": "application/json", ...(out.headers ?? {}) });
       res.end(out.body);
     });

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { after, beforeEach, test } from "node:test";
 import { createWalletBackup } from "../src/backup";
-import { WALLET_EXISTS_MESSAGE } from "../src/guards/wallet";
+import { WALLET_EXISTS_MESSAGE, WALLET_UNKNOWN_MESSAGE } from "../src/guards/wallet";
 import { startHarness, type Harness } from "./helpers";
 
 let h: Harness | undefined;
@@ -129,4 +129,40 @@ test("createWalletBackup includes the legacy mnemonic file and never reuses a di
   assert.deepEqual(a.items, ["wallet", "password", "validators", "mnemonic"]);
   assert.equal(await readFile(path.join(a.path, "mnemonic"), "utf8"), MNEMONIC);
   assert.equal(await readFile(path.join(d, "mnemonic"), "utf8"), MNEMONIC);
+});
+
+for (const route of ["wallet/init", "wallet/recover", "wallet/search-and-recover", "wallet/set-password"]) {
+  test(`${route} fails closed (503) when Smartnode's wallet/status answers with an error`, async () => {
+    h!.setUpstream(() => ({ status: 500, body: '{"status":"error","error":"daemon busy"}' }));
+    const r = await h!.post(`/api/sn/${route}`, { mnemonic: MNEMONIC, password: "newpassword1" });
+    assert.equal(r.status, 503);
+    assert.equal(r.json.error, WALLET_UNKNOWN_MESSAGE);
+    assert.equal(walletCalls(h!, `/api/${route}`).length, 0);
+  });
+}
+
+test("wallet/init fails closed when there is no API token yet (daemon starting)", async () => {
+  await rm(path.join(h!.config.dataDir, "api-tokens.json"));
+  const r = await h!.post("/api/sn/wallet/init", {});
+  assert.equal(r.status, 503);
+  assert.equal(r.json.error, WALLET_UNKNOWN_MESSAGE);
+  assert.equal(h!.calls.length, 0);
+});
+
+test("wallet/recover fails closed when the daemon is unreachable", async () => {
+  const down = await startHarness({ SN_API: "http://127.0.0.1:1" });
+  try {
+    const r = await down.post("/api/sn/wallet/recover", { mnemonic: MNEMONIC });
+    assert.equal(r.status, 503);
+    assert.equal(r.json.error, WALLET_UNKNOWN_MESSAGE);
+  } finally {
+    await down.close();
+  }
+});
+
+test("a wallet file still wins (409) even when the daemon can't be asked", async () => {
+  await seedWallet(h!.config.dataDir);
+  h!.setUpstream(() => ({ status: 500, body: '{"status":"error","error":"x"}' }));
+  const r = await h!.post("/api/sn/wallet/init", {});
+  assert.equal(r.status, 409);
 });

@@ -13,7 +13,12 @@ export const EXPORT_CONFIRM_TEXT = "EXPORT";
 export interface WalletState {
   walletExists: boolean;
   passwordSet: boolean;
+  /** Smartnode's wallet/status could be read; without it the guards refuse. */
+  daemonChecked: boolean;
 }
+
+export const WALLET_UNKNOWN_MESSAGE =
+  "Can't check the wallet state right now. Please try again in a minute.";
 
 async function fileExists(p: string): Promise<boolean> {
   try {
@@ -44,6 +49,7 @@ export async function readWalletState(
   return {
     walletExists: walletFile || sn?.walletInitialized === true,
     passwordSet: passwordFile || sn?.passwordSet === true,
+    daemonChecked: sn !== null && typeof sn === "object",
   };
 }
 
@@ -61,7 +67,8 @@ export const WALLET_EXISTS_MESSAGE =
  *  - wallet/init, wallet/recover, wallet/search-and-recover: refused (409) whenever a
  *    wallet exists. Replacing a wallet is not supported in this release; no code path
  *    moves, overwrites or deletes the wallet or password files.
- *  - wallet/set-password: refused (409) when a password is already set.
+ *    When Smartnode's wallet/status can't be read, they are refused with 503 (fail closed).
+ *  - wallet/set-password: refused (409) when a password is already set, 503 when unknown.
  *  - wallet/export: needs typedConfirmation=EXPORT (400 otherwise).
  */
 export async function applyWalletGuards(
@@ -73,11 +80,14 @@ export async function applyWalletGuards(
   if (WALLET_CHANGE_ROUTES.has(route)) {
     const state = await ctx.walletState();
     if (state.walletExists) throw new HttpError(409, WALLET_EXISTS_MESSAGE);
+    // fail closed: never create or restore a wallet without the daemon's own view
+    if (!state.daemonChecked) throw new HttpError(503, WALLET_UNKNOWN_MESSAGE);
     return { params: out };
   }
   if (route === "wallet/set-password") {
     const state = await ctx.walletState();
     if (state.passwordSet) throw new HttpError(409, "A wallet password is already set on this node.");
+    if (!state.daemonChecked) throw new HttpError(503, WALLET_UNKNOWN_MESSAGE);
     return { params: out };
   }
   if (route === "wallet/export") {

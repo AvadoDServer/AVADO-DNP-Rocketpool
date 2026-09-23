@@ -8,7 +8,9 @@ export function isSafeMethod(method: string | undefined): boolean {
 
 function sameHost(value: string, host: string): boolean {
   try {
-    return new URL(value).host.toLowerCase() === host.toLowerCase();
+    const url = new URL(value);
+    // compare with the default port removed on both sides (Host "x:80" == Origin "http://x")
+    return url.host.toLowerCase() === new URL(`${url.protocol}//${host}`).host.toLowerCase();
   } catch {
     return false;
   }

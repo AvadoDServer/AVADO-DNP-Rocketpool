@@ -3,7 +3,8 @@ import { cleanLine, parseTail, tailFile } from "./avado/logs";
 import { getAvadoStatus } from "./avado/status";
 import type { Config } from "./config";
 import { checkCsrf, isSafeMethod } from "./csrf";
-import { sendError, sendJson } from "./http-util";
+import { isAllowedHost } from "./host";
+import { Limiter, sendError, sendJson } from "./http-util";
 import type { Logger } from "./log";
 import { getReconcileStatus, requestReconcileRun } from "./reconcile";
 import { handleSmartnodeProxy, SmartnodeClient, SN_PREFIX } from "./sn/proxy";
@@ -23,10 +24,12 @@ function method(expected: "GET" | "POST", handler: Handler): Handler {
 
 export function createApp(config: Config, logger: Logger): RequestListener {
   const client = new SmartnodeClient(config, logger);
+  const longLimiter = new Limiter(config.longRequestLimit);
+  const logLimiter = new Limiter(config.logReadLimit);
 
   const avadoRoutes: Record<string, Handler> = {
     "/api/avado/status": method("GET", async (_req, res) => {
-      sendJson(res, 200, { status: "success", error: "", ...(await getAvadoStatus(config)) });
+      sendJson(res, 200, { status: "success", error: "", ...(await getAvadoStatus(config, logLimiter)) });
     }),
     "/api/avado/reconcile": method("GET", async (_req, res) => {
       sendJson(res, 200, { status: "success", error: "", ...(await getReconcileStatus(config)) });
@@ -38,7 +41,13 @@ export function createApp(config: Config, logger: Logger): RequestListener {
     }),
     "/api/avado/logs": method("GET", async (_req, res, query) => {
       const tail = parseTail(query.get("tail"));
-      const lines = await tailFile(config.daemonLogFile, tail);
+      if (!logLimiter.try()) return sendError(res, 429, "Too many log requests at once. Please try again shortly.");
+      let lines: string[] | null;
+      try {
+        lines = await tailFile(config.daemonLogFile, tail);
+      } finally {
+        logLimiter.release();
+      }
       sendJson(res, 200, {
         status: "success",
         error: "",
@@ -61,6 +70,12 @@ export function createApp(config: Config, logger: Logger): RequestListener {
 
       if (!pathname.startsWith("/api/")) return handleStatic(req, res, pathname, config.uiDir);
 
+      // DNS rebinding guard: the API only answers requests addressed to this box
+      if (!isAllowedHost(req.headers.host, config.allowedHostnames)) {
+        logger.warn(`${req.method} ${pathname} refused: Host not allowed`);
+        return sendError(res, 421, "This API only answers requests addressed to the AVADO box");
+      }
+
       // every state-changing API request must come from our own page
       const csrf = checkCsrf(req);
       if (csrf) {
@@ -69,7 +84,7 @@ export function createApp(config: Config, logger: Logger): RequestListener {
       }
 
       if (pathname.startsWith(SN_PREFIX)) {
-        return handleSmartnodeProxy(req, res, pathname, url.searchParams, { config, logger, client });
+        return handleSmartnodeProxy(req, res, pathname, url.searchParams, { config, logger, client, longLimiter });
       }
 
       const handler = avadoRoutes[pathname];

@@ -9,6 +9,7 @@
  * Deliberately NOT listed (anything else is 404):
  *   - service/terminate-data-folder (deletes the data dir)
  *   - wallet/masquerade, wallet/end-masquerade (writes an `address` file that switches the wallet mode)
+ *   - wallet/test-recover, wallet/test-search-and-recover (take the mnemonic in a GET query)
  *   - wallet/set-ens-name, wallet/estimate-gas-set-ens-name
  *   - node/sign, node/send-message, node/can-send-message (arbitrary signing / calldata)
  *   - node/burn, node/*swap-rpl*, node/create-vacant-minipool, node/claim-rpl-rewards (legacy / unused)
@@ -41,8 +42,6 @@ export const ALLOWED_ROUTES: Readonly<Record<string, RouteSpec>> = Object.freeze
   // wallet
   "wallet/status": R,
   "wallet/recovery-status": R,
-  "wallet/test-recover": { kind: "R", long: true, secret: true },
-  "wallet/test-search-and-recover": { kind: "R", long: true, secret: true },
   "wallet/set-password": { kind: "W", secret: true },
   "wallet/init": { kind: "W", secret: true },
   "wallet/recover": { kind: "W", long: true, secret: true },
