@@ -6,11 +6,24 @@
  *  - anyone (the UI, Smartnode's validatorRestartCommand script) asks for a run by
  *    creating config.reconcileTriggerFile (/tmp/reconcile-now)
  *
- * Task 3 implements startReconcileLoop() here; server.ts already calls it.
+ * The loop itself: loop.ts (scheduling, status file), run.ts (one pass), rules.ts (which
+ * keys, which fee recipient), clients.ts (AVADO consensus-client packages), keymanager.ts,
+ * keystores.ts, wamp.ts (DAPPMANAGER).
  */
 import { readFile, stat, writeFile } from "node:fs/promises";
 import type { Config } from "../config";
+import { HttpError } from "../http-util";
 import type { Logger } from "../log";
+import { SmartnodeClient } from "../sn/proxy";
+import { listInstalledPackages } from "./clients";
+import { createKeymanager } from "./keymanager";
+import { loadKeystore } from "./keystores";
+import { startLoop, type ReconcileLoop } from "./loop";
+import type { SmartnodeReader } from "./run";
+import { WampClient } from "./wamp";
+
+export type { ReconcileStatus } from "./run";
+export type { ReconcileLoop } from "./loop";
 
 export interface ReconcileStatusView {
   /** false until the loop has written a status file. */
@@ -51,12 +64,55 @@ export async function requestReconcileRun(config: Config): Promise<void> {
   await writeFile(config.reconcileTriggerFile, new Date().toISOString() + "\n", { mode: 0o644 });
 }
 
-export interface ReconcileLoop {
-  stop(): void;
+/** Smartnode GET with the token injected; the error envelope and HTTP failures become an Error. */
+export function smartnodeReader(client: SmartnodeClient, timeoutMs: number): SmartnodeReader {
+  return {
+    async get(route, query = {}) {
+      let r: { status: number; body: unknown };
+      try {
+        r = await client.call(route, "GET", new URLSearchParams(query), { timeoutMs });
+      } catch (e) {
+        throw new Error(e instanceof HttpError ? e.message : `Rocket Pool daemon: ${String((e as Error)?.message ?? e)}`);
+      }
+      const body = r.body as { status?: unknown; error?: unknown } | null;
+      if (r.status !== 200 || body?.status !== "success") {
+        const err = typeof body?.error === "string" && body.error ? body.error : `HTTP ${r.status}`;
+        throw new Error(`Rocket Pool daemon (${route}): ${err}`);
+      }
+      return body;
+    },
+  };
 }
 
-/** Stub until Task 3: the loop is not implemented yet. */
-export function startReconcileLoop(_config: Config, logger: Logger): ReconcileLoop {
-  logger.info("reconcile loop: not implemented in this build");
-  return { stop() {} };
+export function startReconcileLoop(config: Config, logger: Logger): ReconcileLoop {
+  const sn = smartnodeReader(new SmartnodeClient(config, logger), config.snTimeoutMs);
+  logger.info(
+    `reconcile loop: every ${Math.round(config.reconcileIntervalMs / 1000)} s, consensus client setting ${config.consensusClient ?? "(none)"}`,
+  );
+  return startLoop({
+    statusFile: config.reconcileStatusFile,
+    triggerFile: config.reconcileTriggerFile,
+    intervalMs: config.reconcileIntervalMs,
+    startDelayMs: 15_000,
+    triggerPollMs: 2_000,
+    minGapMs: 10_000,
+    log: (level, msg) => logger[level](msg),
+    makeDeps(trigger, importAttempts) {
+      const wamp = new WampClient({ url: config.wampUrl, realm: "dappnode_admin" });
+      return {
+        deps: {
+          smartnode: sn,
+          // listPackages runs `docker system df`, which is slow on a busy box
+          listPackages: () => listInstalledPackages(wamp, 60_000),
+          keymanagerFor: (client) => createKeymanager({ baseUrl: client.keymanagerUrl }),
+          loadKeystore: (pubkey, client) => loadKeystore(config.dataDir, pubkey, client),
+          configuredClient: config.consensusClient,
+          importAttempts,
+          trigger,
+          log: (level, msg) => logger[level](msg),
+        },
+        dispose: () => wamp.close(),
+      };
+    },
+  });
 }

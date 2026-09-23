@@ -31,6 +31,12 @@ export interface Config {
   snTimeoutMs: number;
   /** Upstream timeout for /api/wait and wallet recovery in ms. */
   snLongTimeoutMs: number;
+  /** CONSENSUSCLIENT package setting (nimbus, teku, lighthouse, prysm): where Rocket Pool keys go. */
+  consensusClient: string | undefined;
+  /** DAPPMANAGER WAMP router. */
+  wampUrl: string;
+  /** Reconcile loop interval in ms. */
+  reconcileIntervalMs: number;
 }
 
 function num(value: string | undefined, fallback: number): number {
@@ -58,5 +64,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     network: env.NETWORK || "mainnet",
     snTimeoutMs: num(env.SN_TIMEOUT_MS, 120_000),
     snLongTimeoutMs: num(env.SN_LONG_TIMEOUT_MS, 60 * 60_000),
+    consensusClient: env.CONSENSUSCLIENT || undefined,
+    wampUrl: env.WAMP_URL || "ws://wamp.my.ava.do:8080/ws",
+    reconcileIntervalMs: num(env.RECONCILE_INTERVAL_MS, 5 * 60_000),
   };
 }
