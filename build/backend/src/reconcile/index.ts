@@ -14,7 +14,8 @@ import type { Config } from "../config";
 import { HttpError } from "../http-util";
 import type { Logger } from "../log";
 import { SmartnodeClient } from "../sn/proxy";
-import { readApprovedKeys } from "./approved";
+import { readAbsence, writeAbsence } from "./absence";
+import { consumeApprovals, readApprovedKeys } from "./approved";
 import { listInstalledPackages } from "./clients";
 import { createKeymanager } from "./keymanager";
 import { loadKeystore } from "./keystores";
@@ -76,6 +77,11 @@ export function startReconcileLoop(config: Config, logger: Logger): ReconcileLoo
           keymanagerFor: (client) => createKeymanager({ baseUrl: client.keymanagerUrl }),
           loadKeystore: (pubkey, client) => loadKeystore(config.dataDir, pubkey, client),
           readApproved: () => readApprovedKeys(config.dataDir),
+          consumeApprovals: async (pubkeys) => {
+            await consumeApprovals(config.dataDir, pubkeys);
+          },
+          readAbsence: () => readAbsence(config.dataDir),
+          writeAbsence: (map) => writeAbsence(config.dataDir, map),
           configuredClient: config.consensusClient,
           importAttempts,
           trigger,

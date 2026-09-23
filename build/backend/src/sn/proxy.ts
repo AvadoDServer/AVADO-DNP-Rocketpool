@@ -131,7 +131,7 @@ export async function handleSmartnodeProxy(
       // keys created by this node's own deposit may be loaded into the VC without asking
       if (route === "node/deposit" && status === 200) {
         try {
-          const n = await recordDepositKeys(config, body);
+          const n = await recordDepositKeys(config, params, body);
           if (n > 0) logger.info(`node/deposit: ${n} new validator key(s) approved for loading`);
         } catch (e) {
           logger.error(`node/deposit: could not record the new validator keys as approved: ${String((e as Error)?.message ?? e)}`);

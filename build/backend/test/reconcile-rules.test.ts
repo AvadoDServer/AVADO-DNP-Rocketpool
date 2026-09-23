@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CLIENTS, selectClient } from "../src/reconcile/clients";
+import { CLIENTS, importAllowed, selectClient, TEKU_SAFE_IMPORT_VERSION, versionAtLeast } from "../src/reconcile/clients";
 import { normalizeAddress, normalizePubkey } from "../src/reconcile/hex";
 import { feeRecipientFor, parseFeeRecipientInfo, wantedKeys, type FeeRecipientInfo } from "../src/reconcile/rules";
 
@@ -149,4 +149,23 @@ test("client table: mainnet keymanager routes on :9999/keymanager", () => {
       ["prysm", "eth2validator.avado.dnp.dappnode.eth", "http://eth2validator.my.ava.do:9999/keymanager"],
     ],
   );
+});
+
+test("Obol/Charon, SSV and Stader count as possible validator packages (fail closed)", () => {
+  const s = selectClient(
+    installed("teku.avado.dnp.dappnode.eth", "obol.avado.dnp.dappnode.eth", "ssv.avado.dnp.dappnode.eth", "stader.avado.dnp.dappnode.eth", "obol-holesky.avado.dnp.dappnode.eth"),
+    "teku",
+  );
+  assert.deepEqual(s.unknownValidatorPackages, ["obol.avado.dnp.dappnode.eth", "ssv.avado.dnp.dappnode.eth", "stader.avado.dnp.dappnode.eth"]);
+});
+
+test("Teku import gate: TEKU_SAFE_IMPORT_VERSION and version comparison", () => {
+  assert.equal(TEKU_SAFE_IMPORT_VERSION, "0.0.76");
+  const teku = CLIENTS.find((c) => c.id === "teku")!;
+  const nimbus = CLIENTS.find((c) => c.id === "nimbus")!;
+  for (const [v, ok] of [["0.0.75", false], ["0.0.76", true], ["0.0.100", true], ["0.1.0", true], ["v0.0.76", true], ["/ipfs/Qm", false], [null, false]] as const) {
+    assert.equal(importAllowed(teku, v).allowed, ok, String(v));
+  }
+  assert.equal(importAllowed(nimbus, null).allowed, true, "the gate applies to Teku only");
+  assert.equal(versionAtLeast("0.0.9", "0.0.10"), false);
 });

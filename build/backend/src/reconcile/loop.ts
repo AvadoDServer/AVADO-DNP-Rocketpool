@@ -3,13 +3,15 @@
  * and as soon as the trigger file (/tmp/reconcile-now) appears — written by the UI's
  * "Check now" (POST /api/avado/reconcile/run) and by Smartnode's validatorRestartCommand.
  *
- * Runs never overlap. A trigger resets the per-key import attempt counters. The status is
+ * Runs never overlap. A trigger does not reset the per-key import attempt counters (only a
+ * new owner approval of the key does, see run.ts), so repeated triggers cannot turn a
+ * failing import into an unbounded series of attempts. The status is
  * written atomically (temp file + rename) so the HTTP endpoint never reads half a file.
  */
 import { rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { redact } from "../log";
-import type { ReconcileStatus, RunDeps } from "./run";
+import type { ImportAttempts, ReconcileStatus, RunDeps } from "./run";
 import { runReconcile } from "./run";
 
 const DEFERRED_RUN_DELAY_MS = 30_000;
@@ -25,7 +27,7 @@ export interface LoopOptions {
   /** Shortest gap between two runs (trigger spam). */
   minGapMs: number;
   /** Builds the per-run dependencies (a fresh WAMP session etc.) and a cleanup. */
-  makeDeps(trigger: ReconcileStatus["trigger"], importAttempts: Map<string, number>): { deps: RunDeps; dispose(): void };
+  makeDeps(trigger: ReconcileStatus["trigger"], importAttempts: Map<string, ImportAttempts>): { deps: RunDeps; dispose(): void };
   log(level: "info" | "warn" | "error", msg: string): void;
 }
 
@@ -43,7 +45,7 @@ export async function writeStatusFile(file: string, status: ReconcileStatus): Pr
 }
 
 export function startLoop(opts: LoopOptions): ReconcileLoop {
-  const importAttempts = new Map<string, number>();
+  const importAttempts = new Map<string, ImportAttempts>();
   let stopped = false;
   let running: Promise<void> | null = null;
   let lastRunEnd = 0;
@@ -85,7 +87,6 @@ export function startLoop(opts: LoopOptions): ReconcileLoop {
       if (requested && Date.now() - lastRunEnd >= opts.minGapMs) {
         // Remove the request before running, so a request made during the run is not lost.
         await rm(opts.triggerFile, { force: true });
-        importAttempts.clear();
         trigger = "request";
       } else if (Date.now() >= nextRunAt) {
         trigger = firstRun ? "startup" : "timer";

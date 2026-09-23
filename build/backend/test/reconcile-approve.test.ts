@@ -3,7 +3,8 @@ import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promise
 import os from "node:os";
 import path from "node:path";
 import { after, afterEach, before, beforeEach, test } from "node:test";
-import { addApprovedKeys, APPROVED_KEYS_FILE, readApprovedKeys } from "../src/reconcile/approved";
+import { ABSENCE_FILE, readAbsence, updateAbsence, writeAbsence } from "../src/reconcile/absence";
+import { addApprovedKeys, APPROVED_KEYS_FILE, consumeApprovals, isUsable, readApprovedKeys } from "../src/reconcile/approved";
 import { startHarness, type Harness } from "./helpers";
 
 const pk = (c: string) => c.repeat(96);
@@ -20,35 +21,69 @@ afterEach(async () => {
 });
 
 test("approved list: missing file is empty; add is append-only, deduplicated, 0600", async () => {
-  assert.deepEqual(await readApprovedKeys(dir), { keys: new Set() });
+  assert.deepEqual(await readApprovedKeys(dir), { entries: new Map() });
   assert.equal(await addApprovedKeys(dir, [pk("1"), "0x" + pk("2").toUpperCase(), "junk", pk("1")], "deposit", new Date("2026-09-23T10:00:00Z")), 2);
-  assert.equal(await addApprovedKeys(dir, [pk("1"), pk("3")], "owner", new Date("2026-09-24T10:00:00Z")), 1);
+  // pk1 exists (unused deposit approval: renewed), pk3 is new
+  assert.equal(await addApprovedKeys(dir, [pk("1"), pk("3")], "owner", new Date("2026-09-24T10:00:00Z")), 2);
   const file = path.join(dir, APPROVED_KEYS_FILE);
   const data = JSON.parse(await readFile(file, "utf8"));
-  assert.deepEqual(data.keys[pk("1")], { source: "deposit", approvedAt: "2026-09-23T10:00:00.000Z" }, "an existing entry keeps its source");
+  assert.deepEqual(
+    data.keys[pk("1")],
+    { source: "deposit", approvedAt: "2026-09-23T10:00:00.000Z", renewedAt: "2026-09-24T10:00:00.000Z" },
+    "an existing entry keeps its source",
+  );
   assert.equal(data.keys[pk("3")].source, "owner");
   assert.equal((await stat(file)).mode & 0o777, 0o600);
-  assert.deepEqual([...(await readApprovedKeys(dir)).keys].sort(), [pk("1"), pk("2"), pk("3")]);
+  assert.deepEqual([...(await readApprovedKeys(dir)).entries.keys()].sort(), [pk("1"), pk("2"), pk("3")]);
   assert.deepEqual((await readdir(dir)).sort(), [APPROVED_KEYS_FILE], "no temp files left");
 });
 
 test("approved list: concurrent adds are serialised and none is lost", async () => {
   await Promise.all([pk("1"), pk("2"), pk("3"), pk("4"), pk("5")].map((k) => addApprovedKeys(dir, [k], "owner")));
-  assert.equal((await readApprovedKeys(dir)).keys.size, 5);
+  assert.equal((await readApprovedKeys(dir)).entries.size, 5);
 });
 
 test("approved list: a corrupt file approves nothing and is kept aside, never deleted", async () => {
   const file = path.join(dir, APPROVED_KEYS_FILE);
   await writeFile(file, "{not json");
   const r = await readApprovedKeys(dir);
-  assert.equal(r.keys.size, 0);
+  assert.equal(r.entries.size, 0);
   assert.match(r.error!, /not valid/);
   await addApprovedKeys(dir, [pk("7")], "owner");
   const names = await readdir(dir);
   const aside = names.find((n) => n.startsWith(`${APPROVED_KEYS_FILE}.corrupt-`));
   assert.ok(aside, names.join(","));
   assert.equal(await readFile(path.join(dir, aside!), "utf8"), "{not json");
-  assert.deepEqual([...(await readApprovedKeys(dir)).keys], [pk("7")]);
+  assert.deepEqual([...(await readApprovedKeys(dir)).entries.keys()], [pk("7")]);
+});
+
+test("approved list: approvals are single-use; the owner can approve again, a deposit cannot", async () => {
+  const t = (h: number) => new Date(Date.UTC(2026, 8, 23, h));
+  await addApprovedKeys(dir, [pk("1"), pk("2")], "deposit", t(1));
+  assert.equal(await consumeApprovals(dir, [pk("1"), pk("9")], t(2)), 1);
+  let e = (await readApprovedKeys(dir)).entries;
+  assert.equal(e.get(pk("1"))!.loadedAt, t(2).toISOString());
+  assert.equal(isUsable(e.get(pk("1"))), false);
+  assert.equal(isUsable(e.get(pk("2"))), true);
+  // a deposit never revives a used approval
+  assert.equal(await addApprovedKeys(dir, [pk("1")], "deposit", t(3)), 0);
+  assert.equal(isUsable((await readApprovedKeys(dir)).entries.get(pk("1"))), false);
+  // the owner approving again gives a fresh approval; on an unused one it renews it
+  assert.equal(await addApprovedKeys(dir, [pk("1"), pk("2")], "owner", t(4)), 2);
+  e = (await readApprovedKeys(dir)).entries;
+  assert.deepEqual(e.get(pk("1")), { source: "owner", approvedAt: t(4).toISOString() });
+  assert.deepEqual(e.get(pk("2")), { source: "deposit", approvedAt: t(1).toISOString(), renewedAt: t(4).toISOString() });
+});
+
+test("absence observations persist across restarts; an unreadable file means nothing has settled", async () => {
+  const t0 = new Date("2026-09-23T10:00:00Z");
+  const m = updateAbsence(new Map(), new Map([[pk("1"), "absent"], [pk("2"), "present"], [pk("3"), "unknown"]]), t0);
+  assert.deepEqual([...m.keys()], [pk("1")]);
+  await writeAbsence(dir, m);
+  assert.equal((await stat(path.join(dir, ABSENCE_FILE))).mode & 0o777, 0o600);
+  assert.deepEqual(await readAbsence(dir), m);
+  await writeFile(path.join(dir, ABSENCE_FILE), "garbage");
+  assert.equal((await readAbsence(dir)).size, 0);
 });
 
 // ---------- HTTP: approve endpoint and the node/deposit hook ----------
@@ -78,11 +113,17 @@ test("approve: needs the typed confirmation and valid pubkeys; nothing is writte
     { pubkeys: [], confirm: "LOAD" },
     { pubkeys: "0x" + pk("1"), confirm: "LOAD" },
     { pubkeys: [pk("1"), "0x1234"], confirm: "LOAD" },
+    { pubkeys: Array.from({ length: 501 }, (_, i) => i.toString(16).padStart(96, "0")), confirm: "LOAD" },
     [pk("1")],
   ]) {
     const r = await h.post("/api/avado/reconcile/approve", body);
     assert.equal(r.status, 400, JSON.stringify(body));
   }
+  const big = await h.post("/api/avado/reconcile/approve", { pubkeys: Array.from({ length: 501 }, (_, i) => i.toString(16).padStart(96, "0")), confirm: "LOAD" });
+  assert.match(big.json.error, /At most 500/);
+  const max = await h.post("/api/avado/reconcile/approve", { pubkeys: Array.from({ length: 500 }, () => "0x" + pk("a")), confirm: "LOAD" });
+  assert.equal(max.status, 202, "500 keys fit the body limit");
+  await reset();
   assert.equal((await h.post("/api/avado/reconcile/approve", "{bad")).status, 400);
   assert.equal(
     (await h.post("/api/avado/reconcile/approve", "pubkeys=x&confirm=LOAD", { "Content-Type": "application/x-www-form-urlencoded" })).status,
@@ -132,11 +173,14 @@ test("node/deposit: errors, no transaction hash, or other routes approve nothing
     ["node/deposit", { status: "error", error: "insufficient balance", validatorPubkeys: [pk("8")] }, 500],
     ["node/deposit", { status: "success", error: "", txHash: "0x" + "0".repeat(64), validatorPubkeys: [pk("8")] }],
     ["node/deposit", { status: "success", error: "", validatorPubkeys: [pk("8")] }],
+    // a dry run (submit=false) also answers with a transaction hash, but saves no keys
+    ["node/deposit#dry", { status: "success", error: "", txHash: TX, validatorPubkeys: [pk("8")] }],
     ["wallet/rebuild", { status: "success", error: "", txHash: TX, validatorPubkeys: [pk("8")], validatorKeys: [pk("8")] }],
   ];
   for (const [route, body, code] of cases) {
     h.setUpstream(() => ({ status: code ?? 200, body: JSON.stringify(body) }));
-    await h.post(`/api/sn/${route}`, {});
+    const dry = route.endsWith("#dry");
+    await h.post(`/api/sn/${route.replace("#dry", "")}`, dry ? { submit: false } : { submit: true });
   }
   assert.equal(await exists(approvedFile()), false);
   h.setUpstream(() => ({ body: '{"status":"success","error":""}' }));

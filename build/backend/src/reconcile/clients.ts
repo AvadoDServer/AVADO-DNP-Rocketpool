@@ -38,13 +38,47 @@ const KNOWN_KEYLESS = new Set(["prysm-beacon-chain-mainnet.avado.dnp.dappnode.et
 
 /** Testnet variants cannot sign for mainnet validators. */
 const TESTNET_RE = /-(holesky|prater|goerli|gnosis|hoodi|sepolia|testnet)\b/;
-const VALIDATOR_LIKE_RE = /teku|nimbus|lighthouse|prysm|lodestar|grandine|eth2validator|web3signer|vouch/;
+/** Anything that may run a validator client of its own (Obol/Charon bundles Nimbus/Teku VCs). */
+const VALIDATOR_LIKE_RE = /teku|nimbus|lighthouse|prysm|lodestar|grandine|eth2validator|web3signer|vouch|obol|charon|stader|ssv/;
+
+/**
+ * The first Teku package version whose monitor no longer logs the full keymanager request
+ * on an error (AVADO-DNP-Teku build/monitor/server.ts logged `error.config`, i.e. the
+ * keystore and its password). Must match the Teku release carrying that log fix. Keys are
+ * never imported automatically into an older (or unknown-version) Teku.
+ */
+export const TEKU_SAFE_IMPORT_VERSION = "0.0.76";
+
+function parseVersion(v: string | null | undefined): number[] | null {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)$/.exec((v ?? "").trim());
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+
+/** a >= b for x.y.z versions; false when either is not x.y.z (e.g. an IPFS hash install). */
+export function versionAtLeast(a: string | null | undefined, b: string): boolean {
+  const x = parseVersion(a);
+  const y = parseVersion(b);
+  if (!x || !y) return false;
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i]! > y[i]!;
+  return true;
+}
+
+/** Whether keys may be imported automatically into this client package version. */
+export function importAllowed(client: ClientInfo, version: string | null | undefined): { allowed: boolean; reason?: string } {
+  if (client.id !== "teku" || versionAtLeast(version, TEKU_SAFE_IMPORT_VERSION)) return { allowed: true };
+  return {
+    allowed: false,
+    reason: `Update Teku before loading keys: the installed Teku package (${version ?? "unknown version"}) is older than ${TEKU_SAFE_IMPORT_VERSION}, which can write a failed key import, password included, to its log.`,
+  };
+}
 
 export const DAPPMANAGER_LIST_PACKAGES = "listPackages.dappmanager.dnp.dappnode.eth";
 
 export interface InstalledPackage {
   name: string;
   running: boolean;
+  /** Package version as the DAPPMANAGER reports it (image tag), or null. */
+  version?: string | null;
 }
 
 /**
@@ -68,12 +102,17 @@ export async function listInstalledPackages(wamp: WampCaller, timeoutMs = 60_000
     throw new WampError(`listPackages failed${typeof message === "string" ? `: ${message}` : ""}`, "rejected");
   }
   if (!Array.isArray(result)) throw new WampError("listPackages: the result is not a list", "rejected");
-  const byName = new Map<string, boolean>();
-  for (const p of result as Array<{ name?: unknown; running?: unknown }>) {
+  const byName = new Map<string, InstalledPackage>();
+  for (const p of result as Array<{ name?: unknown; running?: unknown; version?: unknown }>) {
     if (typeof p?.name !== "string") continue;
-    byName.set(p.name, (byName.get(p.name) ?? false) || p.running === true);
+    const prev = byName.get(p.name);
+    byName.set(p.name, {
+      name: p.name,
+      running: (prev?.running ?? false) || p.running === true,
+      version: prev?.version ?? (typeof p.version === "string" && p.version ? p.version : null),
+    });
   }
-  return [...byName].map(([name, running]) => ({ name, running }));
+  return [...byName.values()];
 }
 
 export interface ClientSelection {

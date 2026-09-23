@@ -239,8 +239,8 @@ test("DAPPMANAGER listPackages over WAMP: envelope, running flag per package", a
   const wamp = new WampClient({ url: "ws://wamp.test/ws", realm: "dappnode_admin", WebSocket: FakeSocket });
   const list = await listInstalledPackages(wamp);
   assert.deepEqual(list, [
-    { name: "teku.avado.dnp.dappnode.eth", running: true },
-    { name: "rocketpool.avado.dnp.dappnode.eth", running: true },
+    { name: "teku.avado.dnp.dappnode.eth", running: true, version: null },
+    { name: "rocketpool.avado.dnp.dappnode.eth", running: true, version: null },
   ]);
   const s = FakeSocket.last;
   assert.deepEqual(s.protocols, ["wamp.2.json"]);
@@ -266,7 +266,7 @@ test("DAPPMANAGER: success:false and no_such_procedure are errors, never an empt
 
 // ---------- end to end: run against HTTP keymanagers and real keystore files ----------
 
-test("end to end: imports into the chosen client from disk, never touches the other client", async () => {
+test("end to end: imports into the chosen client from disk; the other client only gets fee recipients", async () => {
   const d = path.join(root, "e2e");
   await writeLayout(d, "teku", pk("2"), { password: "teku-secret" });
   const teku = await keymanagerServer();
@@ -286,12 +286,17 @@ test("end to end: imports into the chosen client from disk, never touches the ot
         },
       },
       listPackages: async () => [
-        { name: "teku.avado.dnp.dappnode.eth", running: true },
+        { name: "teku.avado.dnp.dappnode.eth", running: true, version: "0.0.76" },
         { name: "nimbus.avado.dnp.dappnode.eth", running: true },
       ],
       keymanagerFor: (c) => createKeymanager({ baseUrl: c.id === "teku" ? teku.base : nimbus.base }),
       loadKeystore: (p, c) => loadKeystore(d, p, c),
-      readApproved: async () => ({ keys: new Set([pk("2"), pk("3")]) }),
+      readApproved: async () => ({
+        entries: new Map([pk("2"), pk("3")].map((k) => [k, { source: "deposit" as const, approvedAt: "2026-09-23T09:00:00.000Z" }])),
+      }),
+      consumeApprovals: async () => {},
+      readAbsence: async () => new Map(),
+      writeAbsence: async () => {},
       configuredClient: "teku",
       importAttempts: new Map(),
       trigger: "request",
@@ -305,7 +310,12 @@ test("end to end: imports into the chosen client from disk, never touches the ot
     assert.equal(teku.fee.get(pk("1")), FD);
     assert.equal(teku.fee.get(pk("2")), FD);
     assert.ok(!teku.seen.some((x) => x.url.includes(pk("f"))), "the foreign key in Teku is not touched");
-    assert.ok(nimbus.seen.every((x) => x.method === "GET"), "the other client is only read");
+    // the other client gets no import, only the fee recipient of the Rocket Pool key it runs
+    assert.deepEqual(
+      nimbus.seen.filter((x) => x.method !== "GET").map((x) => x.url),
+      [`/keymanager/eth/v1/validator/0x${pk("3")}/feerecipient`],
+    );
+    assert.equal(nimbus.fee.get(pk("3")), FD);
     assert.ok(!JSON.stringify(s).includes("teku-secret"));
   } finally {
     teku.server.close();
@@ -331,7 +341,7 @@ test("loop: runs on the trigger file, removes it, writes the status file atomica
     makeDeps(trigger, importAttempts) {
       triggers.push(trigger);
       attemptsSeen.push(importAttempts.size);
-      importAttempts.set("x", 3);
+      importAttempts.set("x", { count: 3, lastFailAt: "2026-09-23T10:00:00.000Z" });
       return {
         deps: {
           smartnode: { get: async () => ({ walletInitialized: false }) },
@@ -340,7 +350,10 @@ test("loop: runs on the trigger file, removes it, writes the status file atomica
             throw new Error("unused");
           },
           loadKeystore: async () => ({ problem: "missing" }),
-          readApproved: async () => ({ keys: new Set<string>() }),
+          readApproved: async () => ({ entries: new Map() }),
+          consumeApprovals: async () => {},
+          readAbsence: async () => new Map(),
+          writeAbsence: async () => {},
           configuredClient: undefined,
           importAttempts,
           trigger,
@@ -362,7 +375,12 @@ test("loop: runs on the trigger file, removes it, writes the status file atomica
       }
     }
     assert.deepEqual(triggers, ["request"]);
-    assert.deepEqual(attemptsSeen, [0], "a run request resets the attempt counters");
+    assert.deepEqual(attemptsSeen, [0]);
+    // a second trigger does not reset the attempt counters (only a new approval does)
+    await writeFile(triggerFile, "now\n");
+    for (let i = 0; i < 100 && triggers.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+    await loop.idle();
+    assert.deepEqual(attemptsSeen, [0, 1]);
     await assert.rejects(() => stat(triggerFile), "the trigger file is consumed");
     const status = JSON.parse(await readFile(statusFile, "utf8")) as ReconcileStatus;
     assert.equal(status.state, "waiting");

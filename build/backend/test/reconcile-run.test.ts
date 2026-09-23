@@ -3,7 +3,9 @@ import { test } from "node:test";
 import type { ClientId, ClientInfo, InstalledPackage } from "../src/reconcile/clients";
 import type { ImportResult, Keymanager } from "../src/reconcile/keymanager";
 import type { KeystoreProblem, LoadedKeystore } from "../src/reconcile/keystores";
-import { MAX_IMPORT_ATTEMPTS, runReconcile, type RunDeps } from "../src/reconcile/run";
+import type { AbsenceMap } from "../src/reconcile/absence";
+import type { ApprovedEntry } from "../src/reconcile/approved";
+import { MAX_IMPORT_ATTEMPTS, runReconcile, type ImportAttempts, type RunDeps } from "../src/reconcile/run";
 
 const SP = "0x" + "5".repeat(40);
 const FD = "0x" + "d".repeat(40);
@@ -47,8 +49,10 @@ class FakeKm implements Keymanager {
     if (r.status === "imported") this.keys.add(JSON.parse(keystoreJson).pubkey);
     return r;
   }
+  failGetFee = false;
   async getFeeRecipient(p: string) {
     this.calls.push(`getfee:${p[0]}`);
+    if (this.failGetFee) throw new Error("HTTP 500: failed");
     return this.fee.get(p) ?? null;
   }
   async setFeeRecipient(p: string, a: string) {
@@ -65,14 +69,24 @@ interface Fixture {
   packages: InstalledPackage[] | Error;
   kms: Partial<Record<ClientId, FakeKm>>;
   keystores: Set<string>;
-  /** The "approved to load" list. */
-  approved: Set<string>;
+  /** The "approved to load" list (persisted between runs, like the file). */
+  approved: Map<string, ApprovedEntry>;
   approvedError?: string;
+  /** Persisted absence observations. */
+  absence: AbsenceMap;
   configured: string | undefined;
   snCalls: string[];
   wampCalls: number;
-  attempts: Map<string, number>;
+  attempts: Map<string, ImportAttempts>;
+  /** The clock for the next run. */
+  now: Date;
 }
+
+const T0 = new Date("2026-09-23T10:00:00Z");
+const at = (min: number) => new Date(T0.getTime() + min * 60_000);
+const deposit = (): ApprovedEntry => ({ source: "deposit", approvedAt: "2026-09-23T09:00:00.000Z" });
+const owner = (): ApprovedEntry => ({ source: "owner", approvedAt: "2026-09-23T09:00:00.000Z" });
+const approvals = (kind: () => ApprovedEntry, ...keys: string[]) => new Map(keys.map((k) => [k, kind()]));
 
 function fixture(o: Partial<Fixture> = {}): Fixture {
   return {
@@ -94,14 +108,16 @@ function fixture(o: Partial<Fixture> = {}): Fixture {
       ],
     },
     megapool: { status: "success", megapoolDetails: { validators: [] } },
-    packages: [{ name: PKG.teku, running: true }],
+    packages: [{ name: PKG.teku, running: true, version: "0.0.76" }],
     kms: { teku: new FakeKm() },
     keystores: new Set([pk("1"), pk("2"), pk("3"), pk("4")]),
-    approved: new Set([pk("1"), pk("2"), pk("3"), pk("4")]),
+    approved: approvals(deposit, pk("1"), pk("2"), pk("3"), pk("4")),
+    absence: new Map(),
     configured: "teku",
     snCalls: [],
     wampCalls: 0,
     attempts: new Map(),
+    now: T0,
     ...o,
   };
 }
@@ -131,11 +147,24 @@ function deps(f: Fixture): RunDeps {
       if (!f.keystores.has(p)) return { problem: "missing" };
       return { layout: "teku", keystoreJson: JSON.stringify({ pubkey: p, crypto: {} }), password: `pw-${p[0]}` };
     },
-    readApproved: async () => ({ keys: new Set(f.approved), ...(f.approvedError ? { error: f.approvedError } : {}) }),
+    readApproved: async () => ({
+      entries: new Map([...f.approved].map(([k, v]) => [k, { ...v }])),
+      ...(f.approvedError ? { error: f.approvedError } : {}),
+    }),
+    async consumeApprovals(pubkeys) {
+      for (const p of pubkeys) {
+        const e = f.approved.get(p);
+        if (e && !e.loadedAt) e.loadedAt = f.now.toISOString();
+      }
+    },
+    readAbsence: async () => new Map(f.absence),
+    async writeAbsence(map) {
+      f.absence = new Map(map);
+    },
     configuredClient: f.configured,
     importAttempts: f.attempts,
     trigger: "timer",
-    now: () => new Date("2026-09-23T10:00:00Z"),
+    now: () => f.now,
   };
 }
 
@@ -196,12 +225,12 @@ test("imports the missing Rocket Pool keys and sets their fee recipients", async
   assert.ok(!text.includes("pw-2") && !text.includes("crypto"));
 });
 
-test("a key loaded in another installed client is never imported", async () => {
+test("a key loaded in another installed client is never imported there or here; its fee recipient is fixed there", async () => {
   const nimbus = new FakeKm();
   nimbus.keys.add(pk("2"));
   const f = fixture({
     packages: [
-      { name: PKG.teku, running: true },
+      { name: PKG.teku, running: true, version: "0.0.76" },
       { name: PKG.nimbus, running: false },
     ],
     kms: { teku: new FakeKm(), nimbus },
@@ -211,12 +240,15 @@ test("a key loaded in another installed client is never imported", async () => {
   assert.deepEqual(teku.imported.map((i) => JSON.parse(i.keystoreJson).pubkey), [pk("1")]);
   const v2 = s.validators.find((v) => v.pubkey === pk("2"))!;
   assert.equal(v2.state, "elsewhere");
-  assert.equal(v2.loadedIn, PKG.nimbus);
+  assert.deepEqual(v2.loadedIn, [PKG.nimbus]);
   assert.equal(s.state, "attention");
   assert.equal(s.keys.summary, "1/2");
-  // the other client is only read, never written
-  assert.deepEqual(nimbus.calls, ["list", "remote"]);
-  assert.deepEqual(s.otherClients, [{ id: "nimbus", name: "Nimbus", package: PKG.nimbus, checked: true }]);
+  // nothing is imported into the other client; only the Rocket Pool key's fee recipient is set there
+  assert.equal(nimbus.imported.length, 0);
+  assert.deepEqual(nimbus.calls, ["list", "remote", "getfee:2", `setfee:2:${FD}`]);
+  assert.equal(nimbus.fee.get(pk("2")), FD);
+  const rep = s.clients.find((c) => c.id === "nimbus")!;
+  assert.deepEqual([rep.checked, rep.chosen, rep.rocketPoolKeys, rep.feeRecipients.fixed], [true, false, 1, 1]);
 });
 
 test("a remote (web3signer) key in another client also blocks the import", async () => {
@@ -225,7 +257,7 @@ test("a remote (web3signer) key in another client also blocks the import", async
   lh.remote.add(pk("1"));
   const f = fixture({
     packages: [
-      { name: PKG.teku, running: true },
+      { name: PKG.teku, running: true, version: "0.0.76" },
       { name: PKG.lighthouse, running: true },
     ],
     kms: { teku: new FakeKm(), lighthouse: lh },
@@ -242,7 +274,7 @@ test("when another installed client cannot be checked, nothing is imported (fail
   teku.keys.add(pk("1"));
   const f = fixture({
     packages: [
-      { name: PKG.teku, running: true },
+      { name: PKG.teku, running: true, version: "0.0.76" },
       { name: PKG.prysm, running: false },
     ],
     kms: { teku, prysm },
@@ -259,7 +291,7 @@ test("when another installed client cannot be checked, nothing is imported (fail
 test("an unknown validator package blocks imports", async () => {
   const f = fixture({
     packages: [
-      { name: PKG.teku, running: true },
+      { name: PKG.teku, running: true, version: "0.0.76" },
       { name: "web3signer.avado.dnp.dappnode.eth", running: true },
     ],
   });
@@ -285,13 +317,14 @@ test("keys that are not Rocket Pool keys are never touched", async () => {
   assert.equal(teku.imported.length, 0);
 });
 
-test("the chosen client's key list failing stops the run without imports", async () => {
+test("the chosen client's key list failing: error, no imports", async () => {
   const teku = new FakeKm();
   teku.failList = true;
   const s = await runReconcile(deps(fixture({ kms: { teku } })));
   assert.equal(s.state, "error");
   assert.match(s.message, /Teku/);
   assert.deepEqual(teku.calls, ["list"]);
+  assert.ok(s.validators.every((v) => v.state === "import-blocked"));
 });
 
 test("DAPPMANAGER unreachable: error, nothing touched", async () => {
@@ -302,13 +335,17 @@ test("DAPPMANAGER unreachable: error, nothing touched", async () => {
   assert.deepEqual(allCalls(f), []);
 });
 
-test("configured client not installed: no import into a different client", async () => {
-  const f = fixture({ configured: "nimbus" });
+test("configured client not installed: no import anywhere, fee recipients still fixed where keys run", async () => {
+  const f = fixture({ configured: "prysm" });
+  const teku = f.kms.teku!;
+  teku.keys.add(pk("1"));
   const s = await runReconcile(deps(f));
   assert.equal(s.state, "error");
   assert.equal(s.client, null);
-  assert.match(s.message, /Nimbus/);
-  assert.deepEqual(allCalls(f), []);
+  assert.match(s.message, /set to use Prysm.*not installed.*Fee recipients were checked in Teku/);
+  assert.equal(teku.imported.length, 0);
+  assert.equal(teku.fee.get(pk("1")), FD);
+  assert.equal(s.validators.find((v) => v.pubkey === pk("2"))!.state, "no-client");
 });
 
 test("import retries are bounded per key", async () => {
@@ -325,8 +362,12 @@ test("import retries are bounded per key", async () => {
   assert.equal(teku.imported.length, before, "no further attempt");
   assert.equal(s.validators[0].state, "retry-limit");
   assert.equal(s.state, "attention");
-  // a run request clears the counters (loop.ts); simulate it
-  f.attempts.clear();
+  // a trigger does not reset the bound: only a new owner approval of the key does
+  const s1 = await runReconcile(deps(f));
+  assert.equal(s1.validators[0].state, "retry-limit");
+  f.approved.get(pk("1"))!.renewedAt = at(1).toISOString();
+  f.approved.get(pk("2"))!.renewedAt = at(1).toISOString();
+  f.now = at(2);
   teku.importAnswer = () => ({ status: "imported" });
   const s2 = await runReconcile(deps(f));
   assert.equal(s2.keys.summary, "2/2");
@@ -339,7 +380,7 @@ test("a thrown import error is recorded, never thrown", async () => {
   };
   const s = await runReconcile(deps(f));
   assert.equal(s.validators[0].state, "import-failed");
-  assert.equal(f.attempts.get(pk("1")), 1);
+  assert.equal(f.attempts.get(pk("1"))!.count, 1);
 });
 
 test("a key without a keystore is reported, not imported", async () => {
@@ -418,7 +459,7 @@ test("a node with no validators is in sync (0/0)", async () => {
 // ---------- Fix round 1: keys load only when approved ----------
 
 test("a missing key that is not approved is never imported; it waits for the owner", async () => {
-  const f = fixture({ approved: new Set() });
+  const f = fixture({ approved: new Map() });
   const teku = f.kms.teku!;
   teku.keys.add(pk("1")); // loaded before (e.g. by the old wizard): kept and managed
   const s = await runReconcile(deps(f));
@@ -436,7 +477,7 @@ test("a missing key that is not approved is never imported; it waits for the own
 });
 
 test("approval is per key: approved keys load, the others wait", async () => {
-  const f = fixture({ approved: new Set([pk("2")]) });
+  const f = fixture({ approved: approvals(deposit, pk("2")) });
   (f.node as { minipools: unknown[] }).minipools.push({ address: "0xm3", validatorPubkey: pk("3"), status: { status: "Staking" } });
   const s = await runReconcile(deps(f));
   assert.deepEqual(f.kms.teku!.imported.map((i) => JSON.parse(i.keystoreJson).pubkey), [pk("2")]);
@@ -448,10 +489,10 @@ test("keys without a keystore or loaded elsewhere are not offered for approval",
   const nimbus = new FakeKm();
   nimbus.keys.add(pk("2"));
   const f = fixture({
-    approved: new Set(),
+    approved: new Map(),
     keystores: new Set([pk("2")]),
     packages: [
-      { name: PKG.teku, running: true },
+      { name: PKG.teku, running: true, version: "0.0.76" },
       { name: PKG.nimbus, running: true },
     ],
     kms: { teku: new FakeKm(), nimbus },
@@ -467,7 +508,7 @@ test("an approved key is still subject to the double-signing guard", async () =>
   prysm.failList = true;
   const f = fixture({
     packages: [
-      { name: PKG.teku, running: true },
+      { name: PKG.teku, running: true, version: "0.0.76" },
       { name: PKG.prysm, running: true },
     ],
     kms: { teku: new FakeKm(), prysm },
@@ -478,7 +519,7 @@ test("an approved key is still subject to the double-signing guard", async () =>
 });
 
 test("an unreadable approved list approves nothing and is reported", async () => {
-  const f = fixture({ approved: new Set(), approvedError: ".avado-approved-keys.json is not valid; treating no key as approved" });
+  const f = fixture({ approved: new Map(), approvedError: ".avado-approved-keys.json is not valid; treating no key as approved" });
   const s = await runReconcile(deps(f));
   assert.equal(f.kms.teku!.imported.length, 0);
   assert.ok(s.errors.some((e) => /not valid/.test(e)));
@@ -494,4 +535,240 @@ test("the status says which client was chosen and why", async () => {
   const s3 = await runReconcile(deps(fixture({ configured: "lighthouse" })));
   assert.equal(s3.clientChoice!.source, "none");
   assert.match(s3.clientChoice!.why, /CONSENSUSCLIENT=lighthouse.*not installed/);
+});
+
+// ---------- Fix round 2 ----------
+
+const onlyKey1 = (f: Fixture) => {
+  (f.node as { minipools: unknown[] }).minipools = [{ address: "0xm1", validatorPubkey: pk("1"), status: { status: "Staking" } }];
+};
+
+for (const [label, kind] of [
+  ["deposit-approved", deposit],
+  ["LOAD-approved", owner],
+] as const) {
+  test(`C1: a ${label} key the owner removes on purpose is never re-imported`, async () => {
+    const f = fixture({ approved: approvals(kind, pk("1")) });
+    onlyKey1(f);
+    const teku = f.kms.teku!;
+    if (kind === owner) {
+      // an owner approval waits for the settling time first
+      for (const m of [0, 5, 10, 15]) {
+        f.now = at(m);
+        assert.equal((await runReconcile(deps(f))).validators[0].state, "settling");
+      }
+      f.now = at(20);
+    }
+    const s1 = await runReconcile(deps(f));
+    assert.equal(s1.validators[0].state, "imported");
+    assert.equal(teku.imported.length, 1);
+    assert.ok(f.approved.get(pk("1"))!.loadedAt, "the approval is used up");
+
+    teku.keys.delete(pk("1")); // the owner removes the key (e.g. to run it on another machine)
+    for (const m of [30, 60, 120]) {
+      f.now = at(m);
+      const s = await runReconcile(deps(f));
+      assert.equal(s.validators[0].state, "awaiting-approval");
+      assert.deepEqual(s.awaitingApproval, [pk("1")]);
+      assert.match(s.validators[0].error!, /loaded before and has been removed/);
+    }
+    assert.equal(teku.imported.length, 1, "no second import");
+  });
+}
+
+test("C1: an approved key seen loaded in any client uses its approval up", async () => {
+  const nimbus = new FakeKm();
+  nimbus.keys.add(pk("1"));
+  const f = fixture({
+    packages: [
+      { name: PKG.teku, running: true, version: "0.0.76" },
+      { name: PKG.nimbus, running: true },
+    ],
+    kms: { teku: new FakeKm(), nimbus },
+  });
+  onlyKey1(f);
+  await runReconcile(deps(f));
+  assert.ok(f.approved.get(pk("1"))!.loadedAt);
+  nimbus.keys.delete(pk("1")); // the owner removes it from Nimbus
+  f.now = at(60);
+  const s = await runReconcile(deps(f));
+  assert.equal(s.validators[0].state, "awaiting-approval");
+  assert.equal(f.kms.teku!.imported.length, 0);
+});
+
+test("I1: fee recipients are corrected in every readable installed client", async () => {
+  const nimbus = new FakeKm();
+  nimbus.keys.add(pk("2"));
+  nimbus.fee.set(pk("2"), OTHER);
+  nimbus.keys.add(pk("f")); // not a Rocket Pool key
+  nimbus.fee.set(pk("f"), OTHER);
+  const teku = new FakeKm();
+  teku.keys.add(pk("1"));
+  const f = fixture({
+    packages: [
+      { name: PKG.teku, running: true, version: "0.0.76" },
+      { name: PKG.nimbus, running: true },
+    ],
+    kms: { teku, nimbus },
+  });
+  const s = await runReconcile(deps(f));
+  assert.equal(nimbus.fee.get(pk("2")), FD);
+  assert.equal(nimbus.fee.get(pk("f")), OTHER, "non-Rocket Pool keys are untouched");
+  assert.equal(teku.fee.get(pk("1")), FD);
+  assert.equal(nimbus.imported.length + teku.imported.length, 0);
+  assert.deepEqual(s.validators.find((v) => v.pubkey === pk("2"))!.feeRecipient.clients, [
+    { package: PKG.nimbus, found: OTHER, state: "fixed" },
+  ]);
+  assert.equal(s.feeRecipients.fixed, 2);
+});
+
+test("I2: an owner-approved key is imported only after 20 minutes of continuous absence", async () => {
+  const f = fixture({ approved: approvals(owner, pk("1")) });
+  onlyKey1(f);
+  const teku = f.kms.teku!;
+  let s = await runReconcile(deps(f));
+  assert.equal(s.validators[0].state, "settling");
+  assert.equal(s.validators[0].settlesAt, at(20).toISOString());
+  assert.match(s.message, /absent everywhere for 20 minutes/);
+  f.now = at(10);
+  f.attempts = new Map(); // a backend restart: the observations are persisted
+  s = await runReconcile(deps(f));
+  assert.equal(s.validators[0].state, "settling");
+  f.now = at(19);
+  assert.equal((await runReconcile(deps(f))).validators[0].state, "settling");
+  f.now = at(20);
+  s = await runReconcile(deps(f));
+  assert.equal(s.validators[0].state, "imported");
+  assert.equal(teku.imported.length, 1);
+});
+
+test("I2: a gap in the observations or a sighting restarts the clock", async () => {
+  const f = fixture({ approved: approvals(owner, pk("1")) });
+  onlyKey1(f);
+  await runReconcile(deps(f)); // absent since T0
+  f.now = at(16); // more than 15 min without an observation (backend down)
+  let s = await runReconcile(deps(f));
+  assert.equal(s.validators[0].settlesAt, at(36).toISOString());
+
+  // seen in another client for one run, then gone again
+  const nimbus = new FakeKm();
+  f.packages = [
+    { name: PKG.teku, running: true, version: "0.0.76" },
+    { name: PKG.nimbus, running: true },
+  ];
+  f.kms.nimbus = nimbus;
+  f.approved = approvals(owner, pk("1"));
+  f.now = at(30);
+  s = await runReconcile(deps(f));
+  assert.equal(s.validators[0].settlesAt, at(36).toISOString());
+  nimbus.keys.add(pk("1"));
+  f.now = at(31);
+  await runReconcile(deps(f)); // present: the clock stops (and the approval is used up)
+  nimbus.keys.delete(pk("1"));
+  f.approved = approvals(owner, pk("1")); // the owner approves again
+  f.now = at(32);
+  s = await runReconcile(deps(f));
+  assert.equal(s.validators[0].state, "settling");
+  assert.equal(s.validators[0].settlesAt, at(52).toISOString());
+});
+
+test("I2: an unreadable client breaks the continuity", async () => {
+  const prysm = new FakeKm();
+  const f = fixture({
+    approved: approvals(owner, pk("1")),
+    packages: [
+      { name: PKG.teku, running: true, version: "0.0.76" },
+      { name: PKG.prysm, running: true },
+    ],
+    kms: { teku: new FakeKm(), prysm },
+  });
+  onlyKey1(f);
+  await runReconcile(deps(f)); // absent since T0
+  prysm.failList = true;
+  f.now = at(10);
+  await runReconcile(deps(f));
+  assert.equal(f.absence.size, 0, "cannot tell: the clock is reset");
+  prysm.failList = false;
+  f.now = at(21);
+  const s = await runReconcile(deps(f));
+  assert.equal(s.validators[0].state, "settling");
+  assert.equal(s.validators[0].settlesAt, at(41).toISOString());
+});
+
+test("I2: deposit keys never seen in any client are exempt from the settling delay", async () => {
+  const f = fixture({ approved: approvals(deposit, pk("1")) });
+  onlyKey1(f);
+  const s = await runReconcile(deps(f));
+  assert.equal(s.validators[0].state, "imported");
+});
+
+test("I3: a key loaded in two clients is an error and stops every import", async () => {
+  const nimbus = new FakeKm();
+  nimbus.keys.add(pk("1"));
+  const teku = new FakeKm();
+  teku.keys.add(pk("1"));
+  const f = fixture({
+    packages: [
+      { name: PKG.teku, running: true, version: "0.0.76" },
+      { name: PKG.nimbus, running: true },
+    ],
+    kms: { teku, nimbus },
+  });
+  const s = await runReconcile(deps(f));
+  assert.equal(s.state, "error");
+  assert.equal(s.message, `Validator 0x${pk("1")} is loaded in both Nimbus and Teku — this can get it slashed. Remove it from one of them now.`);
+  assert.equal(s.validators[0].state, "loaded-twice");
+  assert.deepEqual(s.loadedTwice, [{ pubkey: pk("1"), packages: [PKG.nimbus, PKG.teku] }]);
+  assert.equal(s.validators[1].state, "import-blocked", "the approved missing key is not loaded in this run");
+  assert.equal(teku.imported.length, 0);
+  assert.ok(!allCalls(f).some((c) => c.startsWith("delete")), "nothing is removed");
+});
+
+test("I4: no automatic import into an old or unknown-version Teku; fee recipients still fixed", async () => {
+  for (const version of ["0.0.75", "/ipfs/QmX", null]) {
+    const f = fixture({ packages: [{ name: PKG.teku, running: true, version }] });
+    const teku = f.kms.teku!;
+    teku.keys.add(pk("1"));
+    const s = await runReconcile(deps(f));
+    assert.equal(teku.imported.length, 0, String(version));
+    assert.equal(s.validators[1].state, "client-update-needed");
+    assert.match(s.message, /Update Teku before loading keys/);
+    assert.ok(s.importBlockedReasons.some((r) => /Update Teku/.test(r)));
+    assert.equal(teku.fee.get(pk("1")), FD);
+  }
+  const ok = fixture({ packages: [{ name: PKG.teku, running: true, version: "0.0.80" }] });
+  await runReconcile(deps(ok));
+  assert.equal(ok.kms.teku!.imported.length, 2);
+});
+
+test("M3: the approval prompt carries the reason keys cannot be loaded right now", async () => {
+  const prysm = new FakeKm();
+  prysm.failList = true;
+  const f = fixture({
+    approved: new Map(),
+    packages: [
+      { name: PKG.teku, running: true, version: "0.0.76" },
+      { name: PKG.prysm, running: false },
+    ],
+    kms: { teku: new FakeKm(), prysm },
+  });
+  const s = await runReconcile(deps(f));
+  assert.equal(s.awaitingApproval.length, 2);
+  assert.match(s.importBlockedReasons[0], /Prysm.*could not be checked/);
+  assert.match(s.message, /cannot be loaded right now: the keys in Prysm/);
+});
+
+test("M6: when reading a fee recipient fails, setting it is still tried once", async () => {
+  const f = fixture();
+  const teku = f.kms.teku!;
+  teku.keys.add(pk("1"));
+  teku.keys.add(pk("2"));
+  teku.failGetFee = true;
+  const s = await runReconcile(deps(f));
+  assert.equal(teku.fee.get(pk("1")), FD);
+  assert.equal(s.feeRecipients.fixed, 2);
+  teku.failSetFee = true;
+  const s2 = await runReconcile(deps(f));
+  assert.equal(s2.feeRecipients.failed, 2);
+  assert.match(s2.validators[0].feeRecipient.clients[0].error!, /reading failed.*setting failed/);
 });

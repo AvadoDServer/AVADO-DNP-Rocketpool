@@ -49,7 +49,8 @@ export async function requestReconcileRun(config: Config): Promise<void> {
 
 /** The typed confirmation the owner must send to approve loading keys. */
 export const APPROVE_CONFIRMATION = "LOAD";
-export const MAX_APPROVE_KEYS = 1000;
+/** Fits the 64 KiB request body limit with room to spare (a pubkey is about 100 bytes of JSON). */
+export const MAX_APPROVE_KEYS = 500;
 
 /**
  * POST /api/avado/reconcile/approve {pubkeys:[...], confirm:"LOAD"}: the owner confirms
@@ -62,7 +63,12 @@ export async function approveKeysForLoading(config: Config, body: unknown): Prom
     throw new HttpError(400, `Type ${APPROVE_CONFIRMATION} to confirm that these validators are not running anywhere else.`);
   }
   if (!Array.isArray(b.pubkeys) || b.pubkeys.length === 0 || b.pubkeys.length > MAX_APPROVE_KEYS) {
-    throw new HttpError(400, `pubkeys must be a list of 1 to ${MAX_APPROVE_KEYS} validator public keys`);
+    throw new HttpError(
+      400,
+      Array.isArray(b.pubkeys) && b.pubkeys.length > MAX_APPROVE_KEYS
+        ? `At most ${MAX_APPROVE_KEYS} validator keys can be approved at once; approve them in several steps.`
+        : `pubkeys must be a list of 1 to ${MAX_APPROVE_KEYS} validator public keys`,
+    );
   }
   const keys = b.pubkeys.map(normalizePubkey);
   if (keys.some((k) => k === null)) throw new HttpError(400, "pubkeys contains an invalid validator public key");
@@ -73,12 +79,14 @@ export async function approveKeysForLoading(config: Config, body: unknown): Prom
 }
 
 /**
- * Called by the Smartnode proxy after a successful node/deposit: the keys in
+ * Called by the Smartnode proxy after node/deposit answered HTTP 200: the keys in
  * `validatorPubkeys` were just created by this node, so they may be loaded without asking.
- * Only a success answer with a transaction hash counts (without submit=true Smartnode does
- * not save the keys). Returns the number of keys recorded.
+ * Only counts when the request had submit=true (Smartnode saves the keys only then; a dry
+ * run also returns a transaction hash) and the answer is a success with a non-zero hash.
+ * Returns the number of keys recorded.
  */
-export async function recordDepositKeys(config: Config, body: unknown): Promise<number> {
+export async function recordDepositKeys(config: Config, params: URLSearchParams, body: unknown): Promise<number> {
+  if (params.get("submit") !== "true") return 0;
   const b = (body ?? {}) as { status?: unknown; txHash?: unknown; validatorPubkeys?: unknown };
   if (b.status !== "success" || !Array.isArray(b.validatorPubkeys)) return 0;
   if (typeof b.txHash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(b.txHash) || /^0x0{64}$/.test(b.txHash)) return 0;
