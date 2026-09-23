@@ -1,0 +1,20 @@
+{
+  "name": "avado-rocketpool-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AVADO Rocket Pool backend: static UI, Smartnode allow-list proxy, status endpoints",
+  "license": "GPL-3.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.test.json --noEmit",
+    "test": "rm -rf .test-build && tsc -p tsconfig.test.json && node --test \".test-build/test/*.test.js\"",
+    "start": "node dist/server.js"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.6",
+    "typescript": "5.9.2"
+  }
+}
