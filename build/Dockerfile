@@ -1,60 +1,76 @@
-FROM node:21.7.3 as builder
+# AVADO Rocket Pool package image.
+#
+# Build context is the repository root (docker-compose.yml: context ".",
+# dockerfile "build/Dockerfile"), so the image can read the package version
+# from dappnode_package.json. See /.dockerignore for what is sent.
 
-# build wizard
-WORKDIR /usr/src/app/wizard
-COPY wizard .
-RUN yarn
-RUN rm -Rf build && yarn build --production
+ARG NODE_VERSION=22.23.2
 
-# Monitor
-WORKDIR /usr/src/monitor
-COPY monitor .
-RUN yarn --production
+########## Smartnode daemon: download and verify
+FROM --platform=linux/amd64 node:${NODE_VERSION}-bookworm AS smartnode
+ARG RP_VERSION=v1.24.2
+# sha256 of rocketpool-daemon-linux-amd64 from rocket-pool/smartnode release
+# v1.24.2: the asset digest GitHub publishes for the release (checked with
+# `gh release view v1.24.2 -R rocket-pool/smartnode --json assets`). Checked
+# once more on 2026-09-23 by downloading the asset, hashing it, and verifying
+# its .sig with the release's fornax-signing-key.asc
+# (6D3E 960B D402 C646 42A1  EC84 6510 23D6 2E70 B5DD, "Good signature").
+# Update both values together.
+ARG RP_DAEMON_SHA256=823c75adcc452dd036e8d92257e81e85be67aaeba94432bd0e1576a86fd7c18e
+RUN curl -fsSL --retry 3 -o /rocketpoold \
+      "https://github.com/rocket-pool/smartnode/releases/download/${RP_VERSION}/rocketpool-daemon-linux-amd64" \
+    && echo "${RP_DAEMON_SHA256}  /rocketpoold" | sha256sum -c - \
+    && chmod 755 /rocketpoold
 
+########## Backend (Task 2 owns build/backend)
+# TODO(T2-merge): enable this stage and the COPY --from=backend line below
+# once build/backend exists on this branch.
+# FROM --platform=linux/amd64 node:${NODE_VERSION}-bookworm AS backend
+# WORKDIR /usr/src/backend
+# COPY build/backend/package.json build/backend/yarn.lock ./
+# RUN yarn install --frozen-lockfile
+# COPY build/backend/ ./
+# RUN yarn build \
+#     && yarn install --frozen-lockfile --production --ignore-scripts --prefer-offline
 
-####### Main image
+########## Runtime
+FROM --platform=linux/amd64 node:${NODE_VERSION}-bookworm-slim
 
-FROM --platform=linux/amd64 node:21.7.3
-ARG RP_VERSION
-
-RUN mkdir -p /srv/rocketpool
-
-RUN wget "https://github.com/rocket-pool/smartnode-install/releases/download/${RP_VERSION}/rocketpool-cli-linux-amd64" -O /usr/local/bin/rocketpool
-RUN wget "https://github.com/rocket-pool/smartnode-install/releases/download/${RP_VERSION}/rocketpool-daemon-linux-amd64" -O /usr/local/bin/rocketpoold
-
-RUN chmod +x /usr/local/bin/rocketpool /usr/local/bin/rocketpoold
-
-RUN apt-get -y update && apt-get -y upgrade && apt-get -y install \
-    gettext\
-    jq \
-    nginx \
-    sudo \
-    supervisor \
-    vim-tiny \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates gettext-base supervisor \
     && rm -rf /var/lib/apt/lists/*
-RUN useradd -s /bin/false nginx
 
-COPY --from=builder /usr/src/app/wizard/build /usr/local/wizard
-COPY --from=builder /usr/src/monitor /usr/src/monitor
+COPY --from=smartnode /rocketpoold /usr/local/bin/rocketpoold
 
-COPY startRpNode.sh /srv/rocketpool
-COPY restart-validator.sh /srv/rocketpool
-RUN chmod a+x /srv/rocketpool/startRpNode.sh /srv/rocketpool/restart-validator.sh
-RUN ln -sf /srv/rocketpool/restart-validator.sh /srv/rocketpool/stop-validator.sh
-COPY user-settings.template /srv/rocketpool
-COPY settings.template /srv/rocketpool
+# Package version (/srv/rocketpool/package-version). entrypoint.sh exports it
+# as PACKAGE_VERSION for start-node.sh (upgrade backup marker) and the
+# backend. It is read from the manifest instead of a build arg so an
+# `avadosdk increase` bump can never leave it stale.
+COPY dappnode_package.json /tmp/dappnode_package.json
+RUN mkdir -p /srv/rocketpool/scripts \
+    && node -e 'const v = require("/tmp/dappnode_package.json").version; \
+        if (!/^[0-9A-Za-z.+-]+$/.test(v || "")) { console.error("bad package version"); process.exit(1); } \
+        require("fs").writeFileSync("/srv/rocketpool/package-version", v + "\n");' \
+    && rm /tmp/dappnode_package.json
 
-COPY supervisord.conf /etc/supervisord.conf
-COPY nginx.conf /etc/nginx/
+COPY build/entrypoint.sh build/start-node.sh build/signal-reconcile.sh build/user-settings.template /srv/rocketpool/
+COPY build/scripts/ /srv/rocketpool/scripts/
+RUN chmod 755 /srv/rocketpool/entrypoint.sh /srv/rocketpool/start-node.sh /srv/rocketpool/signal-reconcile.sh /srv/rocketpool/scripts/*.sh
+COPY build/supervisord.conf /etc/supervisord.conf
 
-# For testing
-RUN echo 'alias rp="rocketpool --daemon-path /usr/local/bin/rocketpoold --config-path /srv/rocketpool --allow-root"' >> ~/.bashrc
-RUN echo 'alias rpd="rocketpoold --settings /srv/rocketpool/user-settings.yml api"' >> ~/.bashrc
+# TODO(T2-merge): COPY --from=backend /usr/src/backend /usr/src/backend
+# TODO(T5): the UI build goes to /usr/local/ui (served by the backend).
 
-# TODO?
-# RUN useradd nginx
+# Build-time check: Smartnode's own config loader accepts the rendered
+# template (the same check start-node.sh runs on every start).
+RUN NETWORK=mainnet EXECUTIONCLIENT=geth CONSENSUSCLIENT=teku bash -c '\
+      . /srv/rocketpool/scripts/lib.sh \
+      && SMARTNODE_VERSION="$(smartnode_version)" \
+      && [ "$SMARTNODE_VERSION" = "1.24.2" ] \
+      && resolve_client_urls \
+      && config_preflight \
+      || { echo "config preflight failed: ${PREFLIGHT_OUTPUT:-}"; exit 1; }'
 
 WORKDIR /
-ENTRYPOINT ["supervisord", "--nodaemon", "--configuration", "/etc/supervisord.conf"]
-
-
+# Exports PACKAGE_VERSION to both programs, then runs supervisord.
+ENTRYPOINT ["/srv/rocketpool/entrypoint.sh"]
