@@ -63,12 +63,21 @@ export const WALLET_EXISTS_MESSAGE =
   "This AVADO already has a Rocket Pool wallet. Contact support@ava.do if you need to change it.";
 
 /**
+ * Shown when someone tries to set a password on a node that already has a wallet (with or
+ * without its password file). A new password could never decrypt the existing wallet.
+ */
+export const SET_PASSWORD_WALLET_EXISTS_MESSAGE =
+  "This AVADO already has a Rocket Pool wallet, so its password can't be set here. Please contact support@ava.do.";
+
+/**
  * Runs the wallet guards for a write route. Throws HttpError to refuse.
  *  - wallet/init, wallet/recover, wallet/search-and-recover: refused (409) whenever a
  *    wallet exists. Replacing a wallet is not supported in this release; no code path
  *    moves, overwrites or deletes the wallet or password files.
  *    When Smartnode's wallet/status can't be read, they are refused with 503 (fail closed).
- *  - wallet/set-password: refused (409) when a password is already set, 503 when unknown.
+ *  - wallet/set-password: refused (409) when a password is already set, or when a wallet
+ *    exists at all (even if its password file is missing: a new password can't decrypt it);
+ *    503 when unknown.
  *  - wallet/export: needs typedConfirmation=EXPORT (400 otherwise).
  */
 export async function applyWalletGuards(
@@ -86,6 +95,7 @@ export async function applyWalletGuards(
   }
   if (route === "wallet/set-password") {
     const state = await ctx.walletState();
+    if (state.walletExists) throw new HttpError(409, SET_PASSWORD_WALLET_EXISTS_MESSAGE);
     if (state.passwordSet) throw new HttpError(409, "A wallet password is already set on this node.");
     if (!state.daemonChecked) throw new HttpError(503, WALLET_UNKNOWN_MESSAGE);
     return { params: out };

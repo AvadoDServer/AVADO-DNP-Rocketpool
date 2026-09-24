@@ -76,8 +76,8 @@ test("a client that disconnects mid-body causes no 500 and no ERROR log", async 
   await new Promise<void>((resolve) => {
     const s = net.connect(port, "127.0.0.1", () => {
       s.write(
-        `POST /api/sn/node/set-timezone HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nX-Avado-Request: 1\r\n` +
-          `Content-Type: application/json\r\nContent-Length: 1000\r\n\r\n{"timezoneLocation":`,
+        `POST /api/sn/node/set-smoothing-pool-status HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nX-Avado-Request: 1\r\n` +
+          `Content-Type: application/json\r\nContent-Length: 1000\r\n\r\n{"status":`,
       );
       setTimeout(() => {
         s.destroy();
@@ -89,6 +89,6 @@ test("a client that disconnects mid-body causes no 500 and no ERROR log", async 
   await settle();
   const logs = h.logs.join("\n");
   assert.ok(!/ ERROR /.test(logs), logs);
-  assert.ok(!/set-timezone 500/.test(logs), logs);
-  assert.equal(h.calls.filter((c) => c.path === "/api/node/set-timezone").length, 0);
+  assert.ok(!/set-smoothing-pool-status 500/.test(logs), logs);
+  assert.equal(h.calls.filter((c) => c.path === "/api/node/set-smoothing-pool-status").length, 0);
 });

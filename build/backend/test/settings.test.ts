@@ -34,7 +34,7 @@ smartnode:
   # Gas (gwei). manualMaxFee 0 = use the network estimate; the backend always
   # sends an explicit maxFee for transactions the owner confirms.
   manualMaxFee: "0"
-  priorityFee: "0.01"
+  priorityFee: "1"
   # "Automatic TX Gas Threshold"
   minipoolStakeGasThreshold: "20"
   # Auto-distribute a minipool once its EL balance exceeds this (ETH).
@@ -59,7 +59,7 @@ test("reads the numeric smartnode settings from a real rendering, as strings, wi
   const settings = await readAutoTxSettings(p);
   assert.ok(settings);
   assert.equal(settings.manualMaxFee, "0");
-  assert.equal(settings.priorityFee, "0.01");
+  assert.equal(settings.priorityFee, "1");
   assert.equal(settings.minipoolStakeGasThreshold, "20");
   assert.equal(settings.autoTxGasThreshold, "20");
   assert.equal(settings.distributeThreshold, "1");
@@ -83,11 +83,11 @@ test("includes autoTxMaxFee (and its unit) only when the file has it", async () 
 });
 
 test("single-quoted and unquoted-but-irrelevant values are handled", async () => {
-  const withQuotes = RENDERED.replace('priorityFee: "0.01"', "priorityFee: '0.01'");
+  const withQuotes = RENDERED.replace('priorityFee: "1"', "priorityFee: '1'");
   const p = await file("single-quoted.yml", withQuotes);
   const settings = await readAutoTxSettings(p);
   assert.ok(settings);
-  assert.equal(settings.priorityFee, "0.01");
+  assert.equal(settings.priorityFee, "1");
 });
 
 test("returns null when the file is missing", async () => {

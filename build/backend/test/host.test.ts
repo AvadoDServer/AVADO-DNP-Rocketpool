@@ -53,8 +53,8 @@ test("isAllowedHost: box names, IP literals and localhost pass; anything else fa
   }
 });
 
-test("reviewer repro: DNS-rebound POST node/send-all is refused before anything else", async () => {
-  const r = await h.request("POST", "/api/sn/node/send-all", {
+test("reviewer repro: DNS-rebound POST node/withdraw-eth is refused before anything else", async () => {
+  const r = await h.request("POST", "/api/sn/node/withdraw-eth", {
     headers: {
       Host: "evil.example",
       Origin: "http://evil.example",
@@ -62,7 +62,7 @@ test("reviewer repro: DNS-rebound POST node/send-all is refused before anything 
       "Sec-Fetch-Site": "same-origin",
       "Content-Type": "application/x-www-form-urlencoded",
     },
-    body: "to=0xEvil&token=eth",
+    body: "amount=1000000000000000000",
   });
   assert.equal(r.status, 421);
   assert.equal(h.calls.length, 0);
@@ -93,14 +93,14 @@ test("DNS-rebound reads are refused too (GET, own endpoints included)", async ()
 test("the box's own names pass, with a matching Origin for writes", async () => {
   const g = await h.request("GET", "/api/sn/node/status", { headers: { Host: "rocketpool.my.ava.do" } });
   assert.equal(g.status, 200);
-  const p = await h.request("POST", "/api/sn/node/set-timezone", {
+  const p = await h.request("POST", "/api/sn/node/set-smoothing-pool-status", {
     headers: {
       Host: "rocketpool.my.ava.do:80",
       Origin: "http://rocketpool.my.ava.do:80",
       "X-Avado-Request": "1",
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ timezoneLocation: "Etc/UTC" }),
+    body: JSON.stringify({ status: true }),
   });
   assert.equal(p.status, 200);
   const extra = await h.request("GET", "/api/sn/node/status", { headers: { Host: "rp.example.lan" } });

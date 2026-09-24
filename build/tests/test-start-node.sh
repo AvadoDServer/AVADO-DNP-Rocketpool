@@ -131,7 +131,7 @@ assert_contains "$S" '  consensusClient: teku'
 assert_contains "$S" '  apiPort: "8280"'
 assert_contains "$S" '  openApiPort: localhost'
 assert_contains "$S" '  manualMaxFee: "0"'
-assert_contains "$S" '  priorityFee: "0.01"'
+assert_contains "$S" '  priorityFee: "1"'
 assert_contains "$S" '  minipoolStakeGasThreshold: "20"'
 assert_contains "$S" "  validatorRestartCommand: $RP_DIR/signal-reconcile.sh"
 assert_contains "$S" "  validatorStopCommand: $RP_DIR/signal-reconcile.sh"

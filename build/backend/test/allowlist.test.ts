@@ -15,6 +15,30 @@ test("unknown and deliberately excluded routes are 404 and never reach Smartnode
     "/api/sn/wallet/test-recover",
     "/api/sn/wallet/test-search-and-recover",
     "/api/sn/node/sign",
+    // write routes the UI never calls
+    "/api/sn/node/send",
+    "/api/sn/node/send-all",
+    "/api/sn/node/sign-message",
+    "/api/sn/node/set-rpl-withdrawal-address",
+    "/api/sn/megapool/stake",
+    "/api/sn/megapool/reduce-bond",
+    "/api/sn/megapool/dissolve-validator",
+    "/api/sn/megapool/delegate-upgrade",
+    "/api/sn/megapool/set-use-latest-delegate",
+    "/api/sn/minipool/refund",
+    "/api/sn/minipool/delegate-upgrade",
+    "/api/sn/minipool/set-use-latest-delegate",
+    "/api/sn/minipool/rescue-dissolved",
+    "/api/sn/node/set-timezone",
+    "/api/sn/node/confirm-primary-withdrawal-address",
+    "/api/sn/node/confirm-rpl-withdrawal-address",
+    "/api/sn/node/initialize-fee-distributor",
+    "/api/sn/node/withdraw-rpl-v131",
+    "/api/sn/node/set-rpl-locking-allowed",
+    "/api/sn/node/set-stake-rpl-for-allowed",
+    "/api/sn/megapool/notify-validator-exit",
+    "/api/sn/megapool/notify-final-balance",
+    "/api/sn/service/restart-vc",
     "/api/sn/odao/status",
     "/api/sn/constructor",
     "/api/sn/__proto__",
@@ -59,7 +83,7 @@ test("a read is forwarded as GET with its query; /api/sn/x maps to /api/x", asyn
 test("a write is forwarded as POST form-encoded; JSON or form bodies accepted", async () => {
   h.calls.length = 0;
   await h.post("/api/sn/node/register", { timezoneLocation: "Europe/Ljubljana", maxFee: 12.5 });
-  await h.post("/api/sn/node/set-timezone", "timezoneLocation=Etc%2FUTC", {
+  await h.post("/api/sn/node/register", "timezoneLocation=Etc%2FUTC", {
     "Content-Type": "application/x-www-form-urlencoded",
   });
   assert.equal(h.calls.length, 2);
@@ -106,4 +130,31 @@ test("every allow-listed route has a valid kind", () => {
     assert.equal(ALLOWED_ROUTES[secret]?.secret, true, secret);
   }
   assert.equal(ALLOWED_ROUTES["wait"]?.long, true);
+});
+
+test("long routes: waits, wallet recovery and rebuild, and node/deposit (key generation + tx) get the long timeout", () => {
+  for (const r of ["wait", "wallet/recover", "wallet/search-and-recover", "wallet/rebuild", "node/wait-and-stake-rpl", "network/download-rewards-file", "node/deposit"]) {
+    assert.equal(ALLOWED_ROUTES[r]?.long, true, r);
+  }
+  assert.deepEqual(ALLOWED_ROUTES["node/deposit"], { kind: "W", long: true });
+});
+
+test("every allow-listed write route is one the UI sends", () => {
+  const writes = Object.entries(ALLOWED_ROUTES).filter(([, v]) => v.kind === "W").map(([k]) => k).sort();
+  assert.deepEqual(writes, [
+    "megapool/claim-refund", "megapool/distribute", "megapool/exit-queue", "megapool/exit-validator", "megapool/repay-debt",
+    "minipool/close", "minipool/distribute-balance", "minipool/exit",
+    "network/download-rewards-file",
+    "node/claim-and-stake-rewards", "node/claim-rewards", "node/claim-unclaimed-rewards", "node/deposit", "node/distribute",
+    "node/provision-express-tickets", "node/register", "node/set-primary-withdrawal-address", "node/set-smoothing-pool-status",
+    "node/stake-rpl", "node/stake-rpl-approve-rpl", "node/unstake-legacy-rpl", "node/unstake-rpl", "node/wait-and-stake-rpl",
+    "node/withdraw-credit", "node/withdraw-eth", "node/withdraw-rpl",
+    "wallet/export", "wallet/init", "wallet/rebuild", "wallet/recover", "wallet/search-and-recover", "wallet/set-password",
+  ]);
+});
+
+test("the read routes of removed writes stay available", () => {
+  for (const r of ["node/can-send", "megapool/can-stake", "megapool/can-reduce-bond", "megapool/can-dissolve-validator", "minipool/can-refund", "node/can-set-rpl-withdrawal-address"]) {
+    assert.deepEqual(ALLOWED_ROUTES[r], { kind: "R" }, r);
+  }
 });
