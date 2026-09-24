@@ -95,6 +95,64 @@ test("status degrades when supervisord is not reachable", async () => {
   }
 });
 
+test("status includes settings (auto-tx thresholds) when the rendered settings file is present and valid", async () => {
+  const settingsFile = path.join(h.root, "user-settings.yml");
+  await writeFile(
+    settingsFile,
+    [
+      "smartnode:",
+      '  manualMaxFee: "0"',
+      '  priorityFee: "0.01"',
+      '  minipoolStakeGasThreshold: "20"',
+      '  distributeThreshold: "1"',
+      "",
+    ].join("\n"),
+  );
+  const other = await startHarness({ SETTINGS_FILE: settingsFile });
+  try {
+    const r = await other.request("GET", "/api/avado/status");
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.json.settings, {
+      autoTxGasThreshold: "20",
+      minipoolStakeGasThreshold: "20",
+      manualMaxFee: "0",
+      priorityFee: "0.01",
+      distributeThreshold: "1",
+      units: {
+        autoTxGasThreshold: "gwei",
+        minipoolStakeGasThreshold: "gwei",
+        manualMaxFee: "gwei",
+        priorityFee: "gwei",
+        distributeThreshold: "ETH",
+      },
+    });
+  } finally {
+    await other.close();
+  }
+});
+
+test("status omits settings (never fails) when the rendered settings file is missing or unparseable", async () => {
+  const missing = await startHarness({ SETTINGS_FILE: path.join(h.root, "no-such-settings-file.yml") });
+  try {
+    const r = await missing.request("GET", "/api/avado/status");
+    assert.equal(r.status, 200);
+    assert.equal("settings" in r.json, false);
+  } finally {
+    await missing.close();
+  }
+
+  const garbageFile = path.join(h.root, "garbage-settings.yml");
+  await writeFile(garbageFile, "not: yaml: at: all: {{{\n");
+  const garbage = await startHarness({ SETTINGS_FILE: garbageFile });
+  try {
+    const r = await garbage.request("GET", "/api/avado/status");
+    assert.equal(r.status, 200);
+    assert.equal("settings" in r.json, false);
+  } finally {
+    await garbage.close();
+  }
+});
+
 test("logs returns the redacted tail", async () => {
   const lines = Array.from({ length: 50 }, (_, i) => `line ${i}`);
   lines.push(`Authorization: Bearer ${TOKEN}`);

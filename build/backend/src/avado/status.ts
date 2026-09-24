@@ -5,6 +5,7 @@ import type { Config } from "../config";
 import type { Limiter } from "../http-util";
 import { redact } from "../log";
 import { recentErrors } from "./logs";
+import { readAutoTxSettings, type AutoTxSettings } from "./settings";
 import { getProcessState, type ProcessState } from "./supervisor";
 
 export const SUPPORTED_NETWORKS = ["mainnet"];
@@ -25,6 +26,12 @@ export interface AvadoStatus {
   passwordFilePresent: boolean;
   /** The legacy plaintext recovery phrase file from the old package is still in the data dir. */
   legacyMnemonicPresent: boolean;
+  /**
+   * Automatic-transaction settings the daemon actually runs with, read from the
+   * rendered Smartnode settings file. Omitted (not null) when that file can't be
+   * read or parsed, so a rendering or upgrade hiccup never fails the status call.
+   */
+  settings?: AutoTxSettings;
 }
 
 async function isFile(p: string): Promise<boolean> {
@@ -54,6 +61,15 @@ async function healthz(snApi: string): Promise<boolean> {
   }
 }
 
+/** readAutoTxSettings already treats every failure as "return null"; this is a defensive belt-and-braces layer so a future change there can never fail the whole status call. */
+async function safeAutoTxSettings(settingsFile: string): Promise<AutoTxSettings | null> {
+  try {
+    return await readAutoTxSettings(settingsFile);
+  } catch {
+    return null;
+  }
+}
+
 async function limitedErrors(file: string, limiter: Limiter): Promise<string[]> {
   // under load the error lines are skipped rather than queued
   if (!limiter.try()) return [];
@@ -66,7 +82,7 @@ async function limitedErrors(file: string, limiter: Limiter): Promise<string[]> 
 
 export async function getAvadoStatus(config: Config, logLimiter: Limiter): Promise<AvadoStatus> {
   const d = config.dataDir;
-  const [daemon, apiReachable, apiTokenPresent, startupError, daemonErrors, backups, wallet, password, mnemonic, marker] =
+  const [daemon, apiReachable, apiTokenPresent, startupError, daemonErrors, backups, wallet, password, mnemonic, marker, settings] =
     await Promise.all([
       getProcessState(config.supervisorSocket, config.daemonProgram),
       healthz(config.snApi),
@@ -78,6 +94,7 @@ export async function getAvadoStatus(config: Config, logLimiter: Limiter): Promi
       isFile(path.join(d, "password")),
       isFile(path.join(d, "mnemonic")),
       readSmall(path.join(d, ".avado-package-version")),
+      safeAutoTxSettings(config.settingsFile),
     ]);
   return {
     packageVersion: config.packageVersion ?? marker,
@@ -92,5 +109,6 @@ export async function getAvadoStatus(config: Config, logLimiter: Limiter): Promi
     walletFilePresent: wallet,
     passwordFilePresent: password,
     legacyMnemonicPresent: mnemonic,
+    ...(settings ? { settings } : {}),
   };
 }
