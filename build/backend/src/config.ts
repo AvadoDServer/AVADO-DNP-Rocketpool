@@ -21,6 +21,8 @@ export interface Config {
   daemonLogFile: string;
   /** Optional file with a startup error written by the start script (bad config, unsupported network). */
   startupErrorFile: string;
+  /** Rendered Smartnode settings file (build/user-settings.template), rewritten on every start. */
+  settingsFile: string;
   /** Supervisord XML-RPC unix socket. */
   supervisorSocket: string;
   /** Supervisord program name of the daemon. */
@@ -65,6 +67,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     reconcileTriggerFile: env.RECONCILE_TRIGGER_FILE || "/tmp/reconcile-now",
     daemonLogFile: env.DAEMON_LOG_FILE || "/var/log/rocketpool/daemon.log",
     startupErrorFile: env.STARTUP_ERROR_FILE || "/tmp/rocketpool-startup-error.txt",
+    settingsFile: env.SETTINGS_FILE || "/srv/rocketpool/user-settings.yml",
     supervisorSocket: env.SUPERVISOR_SOCKET || "/dev/shm/supervisor.sock",
     daemonProgram: env.DAEMON_PROGRAM || "rocketpool-node",
     packageVersion: env.PACKAGE_VERSION || undefined,
