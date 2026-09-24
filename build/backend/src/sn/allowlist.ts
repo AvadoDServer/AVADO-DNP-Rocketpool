@@ -20,8 +20,14 @@
  *   - write routes the AVADO UI never calls (their read routes stay): node/send, node/send-all
  *     and node/sign-message (hot-wallet drain / arbitrary signing), node/set-rpl-withdrawal-address,
  *     megapool stake, reduce-bond and dissolve-validator, minipool refund and rescue-dissolved,
- *     and the megapool/minipool delegate-upgrade and set-use-latest-delegate setters. Every
- *     write that stays listed is one the UI sends; any other LAN device gets nothing more.
+ *     the megapool/minipool delegate-upgrade and set-use-latest-delegate setters,
+ *     node/set-timezone, node/confirm-primary-withdrawal-address,
+ *     node/confirm-rpl-withdrawal-address, node/initialize-fee-distributor,
+ *     node/withdraw-rpl-v131, node/set-rpl-locking-allowed, node/set-stake-rpl-for-allowed,
+ *     megapool/notify-validator-exit, megapool/notify-final-balance (the daemon sends these
+ *     two itself) and service/restart-vc. Every write that stays listed is one the UI sends
+ *     (checked against AVADO-Client-UI rocketpool-app and rp-simple); any other LAN device
+ *     gets nothing more.
  */
 
 export type RouteKind = "R" | "W";
@@ -67,14 +73,11 @@ export const ALLOWED_ROUTES: Readonly<Record<string, RouteSpec>> = Object.freeze
   "node/can-register": R,
   "node/register": W,
   "node/can-set-timezone": R,
-  "node/set-timezone": W,
   "node/can-set-primary-withdrawal-address": R,
   "node/set-primary-withdrawal-address": W,
   "node/can-confirm-primary-withdrawal-address": R,
-  "node/confirm-primary-withdrawal-address": W,
   "node/can-set-rpl-withdrawal-address": R,
   "node/can-confirm-rpl-withdrawal-address": R,
-  "node/confirm-rpl-withdrawal-address": W,
 
   // node: smoothing pool and fee distributor
   "node/get-smoothing-pool-registration-status": R,
@@ -82,7 +85,6 @@ export const ALLOWED_ROUTES: Readonly<Record<string, RouteSpec>> = Object.freeze
   "node/set-smoothing-pool-status": W,
   "node/is-fee-distributor-initialized": R,
   "node/get-initialize-fee-distributor-gas": R,
-  "node/initialize-fee-distributor": W,
   "node/can-distribute": R,
   "node/distribute": W,
 
@@ -100,11 +102,8 @@ export const ALLOWED_ROUTES: Readonly<Record<string, RouteSpec>> = Object.freeze
   "node/can-withdraw-rpl": R,
   "node/withdraw-rpl": W,
   "node/can-withdraw-rpl-v131": R,
-  "node/withdraw-rpl-v131": W,
   "node/can-set-rpl-locking-allowed": R,
-  "node/set-rpl-locking-allowed": W,
   "node/can-set-stake-rpl-for-allowed": R,
-  "node/set-stake-rpl-for-allowed": W,
 
   // node: megapool deposits and express tickets
   "node/get-bond-requirement": R,
@@ -149,9 +148,7 @@ export const ALLOWED_ROUTES: Readonly<Record<string, RouteSpec>> = Object.freeze
   "megapool/can-exit-validator": R,
   "megapool/exit-validator": W,
   "megapool/can-notify-validator-exit": R,
-  "megapool/notify-validator-exit": W,
   "megapool/can-notify-final-balance": R,
-  "megapool/notify-final-balance": W,
   "megapool/can-distribute": R,
   "megapool/distribute": W,
   "megapool/can-claim-refund": R,
@@ -191,7 +188,6 @@ export const ALLOWED_ROUTES: Readonly<Record<string, RouteSpec>> = Object.freeze
   "queue/get-queue-details": R,
   "service/get-client-status": R,
   "service/get-gas-price-from-latest-block": R,
-  "service/restart-vc": W,
 });
 
 /** Looks up a route key (the part after /api/sn/). Only exact matches count. */

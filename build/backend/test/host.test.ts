@@ -93,14 +93,14 @@ test("DNS-rebound reads are refused too (GET, own endpoints included)", async ()
 test("the box's own names pass, with a matching Origin for writes", async () => {
   const g = await h.request("GET", "/api/sn/node/status", { headers: { Host: "rocketpool.my.ava.do" } });
   assert.equal(g.status, 200);
-  const p = await h.request("POST", "/api/sn/node/set-timezone", {
+  const p = await h.request("POST", "/api/sn/node/set-smoothing-pool-status", {
     headers: {
       Host: "rocketpool.my.ava.do:80",
       Origin: "http://rocketpool.my.ava.do:80",
       "X-Avado-Request": "1",
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ timezoneLocation: "Etc/UTC" }),
+    body: JSON.stringify({ status: true }),
   });
   assert.equal(p.status, 200);
   const extra = await h.request("GET", "/api/sn/node/status", { headers: { Host: "rp.example.lan" } });
