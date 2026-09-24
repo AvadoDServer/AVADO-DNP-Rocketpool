@@ -1,6 +1,0 @@
-{
-    "status": "error",
-    "error": "The node password has not been set. Please run 'rocketpool wallet init' and try again.",
-    "minipools": null,
-    "latestDelegate": "0x0000000000000000000000000000000000000000"
-}

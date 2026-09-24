@@ -34,7 +34,8 @@ export const UI_CSP = [
   "connect-src 'self'",
   "img-src 'self' data:",
   "style-src 'self' 'unsafe-inline'",
-  "font-src 'self'",
+  // data: for the font subsets the UI build inlines (Vite inlines files under 4 KB).
+  "font-src 'self' data:",
   "script-src 'self'",
   "frame-ancestors 'self' http://my.ava.do http://*.my.ava.do",
 ].join("; ");

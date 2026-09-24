@@ -111,6 +111,39 @@ else
     # Placeholder wallet: the API answers, wallet/status reports it can't decode it.
     check "daemon API answers (healthz 200, wallet/status 500 on the placeholder wallet)" "[ \"\${PROBE_OUT%% \\\"*}\" = '200 500' ]"
 fi
+# Backend on port 80: the UI, /api/avado/status, and the Host / CSRF guards.
+# (http.request, because fetch() can't set the Host header.)
+HTTP_JS='const http=require("http");const [m,p,host,hdr,body]=process.argv.slice(1);
+const r=http.request({host:"127.0.0.1",port:80,method:m,path:p,headers:Object.assign({Host:host},JSON.parse(hdr||"{}"))},res=>{let s="";res.on("data",d=>s+=d).on("end",()=>console.log(res.statusCode+" "+s.slice(0,20000).replace(/\n/g," ")))});
+r.on("error",e=>console.log("ERR "+e.message));if(body)r.write(body);r.end();'
+HTTP() { docker exec "$NAME" node -e "$HTTP_JS" "$@" 2>&1; }
+UI_OUT="$(HTTP GET / rocketpool.my.ava.do)"
+UI_ASSET="$(echo "$UI_OUT" | grep -o '/assets/index-[A-Za-z0-9_-]*\.js' | head -n1)"
+STATUS_OUT="$(HTTP GET /api/avado/status rocketpool.my.ava.do)"
+echo "--- /api/avado/status: $STATUS_OUT" >>"$LOG"
+STATUS_JS='const j=JSON.parse(process.argv[1].slice(4));console.log([j.packageVersion,j.daemon&&j.daemon.state,j.apiReachable,j.apiTokenPresent,j.walletFilePresent,j.passwordFilePresent,j.legacyMnemonicPresent,j.backups.length,!!j.settings].join(" "))'
+STATUS_SUM="$(node -e "$STATUS_JS" "$STATUS_OUT" 2>&1)"
+echo "--- status summary: $STATUS_SUM" >>"$LOG"
+check "backend RUNNING" "IN 'supervisorctl status backend' | grep -q RUNNING"
+check "UI served at / (the Rocket Pool app's index.html)" "echo \"\$UI_OUT\" | grep -q '^200 .*id=\"root\"'"
+check "UI asset served" "[ -n \"\$UI_ASSET\" ] && [ \"\$(HTTP GET \"\$UI_ASSET\" rocketpool.my.ava.do | cut -c1-3)\" = 200 ]"
+check "/api/avado/status 200" "[ \"\${STATUS_OUT%% *}\" = 200 ]"
+check "status: version, daemon RUNNING, API up, token, wallet, password, legacy mnemonic, 1 backup, settings" \
+    "[ \"\$STATUS_SUM\" = \"\$(IN 'cat /srv/rocketpool/package-version') RUNNING true true true true true 1 true\" ]"
+check "status never returns the API token or the password" \
+    "! echo \"\$STATUS_OUT\" | grep -q -e rpsn_ -e \"\$(cat \"\$D/password\")\""
+check "/api refused for a foreign Host (421)" "[ \"\$(HTTP GET /api/avado/status evil.example | cut -c1-3)\" = 421 ]"
+check "/api accepted with the container name as Host" \
+    "[ \"\$(HTTP GET /api/avado/status DAppNodePackage-rocketpool.avado.dnp.dappnode.eth | cut -c1-3)\" = 200 ]"
+check "cross-site POST refused (403)" \
+    "[ \"\$(HTTP POST /api/avado/reconcile/run rocketpool.my.ava.do '{\"Origin\":\"http://evil.example\",\"X-Avado-Request\":\"1\",\"Content-Type\":\"application/json\"}' '{}' | cut -c1-3)\" = 403 ]"
+check "POST without X-Avado-Request refused (403)" \
+    "[ \"\$(HTTP POST /api/avado/reconcile/run rocketpool.my.ava.do '{\"Content-Type\":\"application/json\"}' '{}' | cut -c1-3)\" = 403 ]"
+if [ -n "$EXPECT_ADDRESS" ]; then
+    SNW="$(HTTP GET /api/sn/wallet/status rocketpool.my.ava.do)"
+    check "backend proxy /api/sn/wallet/status: same address, no token in the response" \
+        "echo \"\$SNW\" | grep -qi \"^200 .*\$EXPECT_ADDRESS\" && ! echo \"\$SNW\" | grep -q rpsn_"
+fi
 check "no config error" "! grep -qi 'could not deserialize\\|error upgrading configuration' '$LOG'"
 check "rocketpool-node RUNNING" "IN 'supervisorctl status rocketpool-node' | grep -q RUNNING"
 check "PACKAGE_VERSION exported to supervisord (pid 1)" "IN 'tr \"\\000\" \"\\n\" </proc/1/environ' | grep -qx \"PACKAGE_VERSION=\$(IN 'cat /srv/rocketpool/package-version')\""

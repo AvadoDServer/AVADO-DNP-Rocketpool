@@ -5,6 +5,28 @@
 # from dappnode_package.json. See /.dockerignore for what is sent.
 
 ARG NODE_VERSION=22.23.2
+# Where the Rocket Pool UI comes from: "git" (default, every release) clones
+# AVADO-Client-UI at CLIENT_UI_VERSION and runs `yarn build:rocketpool`;
+# "local" takes a prebuilt dist from build/client-ui-dist/
+# (scripts/stage-local-client-ui.sh), for test builds of an unreleased UI only.
+ARG CLIENT_UI_SOURCE=git
+
+########## Rocket Pool UI (https://github.com/AvadoDServer/AVADO-Client-UI)
+# Static files only, so this stage runs on the build host's platform.
+FROM node:${NODE_VERSION}-bookworm-slim AS ui-git
+ARG CLIENT_UI_VERSION=v0.2.0
+ARG CLIENT_UI_REPO=https://github.com/AvadoDServer/AVADO-Client-UI
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 --branch ${CLIENT_UI_VERSION} ${CLIENT_UI_REPO} /ui
+WORKDIR /ui
+RUN yarn install --frozen-lockfile && yarn build:rocketpool
+
+FROM node:${NODE_VERSION}-bookworm-slim AS ui-local
+COPY build/client-ui-dist /ui/dist-rocketpool
+
+FROM ui-${CLIENT_UI_SOURCE} AS ui
 
 ########## Smartnode daemon: download and verify
 FROM --platform=linux/amd64 node:${NODE_VERSION}-bookworm AS smartnode
@@ -61,7 +83,11 @@ COPY --from=backend /usr/src/backend /usr/src/backend
 RUN test -f /usr/src/backend/dist/server.js \
     || { echo "backend build did not produce /usr/src/backend/dist/server.js"; exit 1; }
 
-# TODO(T5): the UI build goes to /usr/local/ui (served by the backend).
+# The UI, served by the backend (UI_DIR default /usr/local/ui).
+COPY --from=ui /ui/dist-rocketpool /usr/local/ui
+RUN rm -f /usr/local/ui/.gitkeep \
+    && test -f /usr/local/ui/index.html \
+    || { echo "Rocket Pool UI missing: /usr/local/ui/index.html"; exit 1; }
 
 # Build-time check: Smartnode's own config loader accepts the rendered
 # template (the same check start-node.sh runs on every start).

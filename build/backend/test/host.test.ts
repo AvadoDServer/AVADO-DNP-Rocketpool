@@ -16,6 +16,10 @@ test("isAllowedHost: box names, IP literals and localhost pass; anything else fa
     "ROCKETPOOL.MY.AVA.DO",
     "rocketpool.my.ava.do.",
     "rocketpool.avado.dnp.dappnode.eth",
+    "my.rocketpool.avado.dnp.dappnode.eth",
+    "DAppNodePackage-rocketpool.avado.dnp.dappnode.eth",
+    "rocketpool.avado.dappnode",
+    "rocketpool.avado.avado",
     "localhost",
     "localhost:8080",
     "127.0.0.1",
@@ -43,6 +47,7 @@ test("isAllowedHost: box names, IP literals and localhost pass; anything else fa
     "[::1",
     "[not-an-ip]",
     "localhost.evil.example",
+    "rocketpool.avadopackage.com",
   ]) {
     assert.equal(isAllowedHost(bad, names), false, String(bad));
   }

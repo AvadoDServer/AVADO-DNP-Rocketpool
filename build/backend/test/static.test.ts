@@ -104,11 +104,14 @@ test("resolveStaticPath never leaves the root", () => {
   assert.equal(resolveStaticPath("/srv/ui", "/a/%00"), null);
 });
 
+// font-src allows data: because the UI build (Vite) inlines font files under
+// 4 KB as data: URIs; with font-src 'self' the browser refuses them (seen on the
+// test box: 6 console errors on every page). Fonts can't run script.
 test("UI responses carry the CSP with frame-ancestors for the AVADO admin and no X-Frame-Options", async () => {
   assert.equal(
     UI_CSP,
     "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; " +
-      "font-src 'self'; script-src 'self'; frame-ancestors 'self' http://my.ava.do http://*.my.ava.do",
+      "font-src 'self' data:; script-src 'self'; frame-ancestors 'self' http://my.ava.do http://*.my.ava.do",
   );
   for (const p of ["/", "/minipools", "/assets/app-123.js", "/favicon.svg", "/nope.js"]) {
     const r = await h.request("GET", p);

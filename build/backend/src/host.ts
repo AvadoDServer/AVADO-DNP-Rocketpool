@@ -14,6 +14,11 @@ export const DEFAULT_ALLOWED_HOSTNAMES = [
   "rocketpool.avado.dnp.dappnode.eth",
   "my.rocketpool.avado.dnp.dappnode.eth",
   "dappnodepackage-rocketpool.avado.dnp.dappnode.eth",
+  // the box's bind also answers these; .avado and .dappnode are not public TLDs.
+  // (It also answers rocketpool.avadopackage.com, which is deliberately NOT
+  // listed: avadopackage.com is a public domain nobody at AVADO controls.)
+  "rocketpool.avado.dappnode",
+  "rocketpool.avado.avado",
 ];
 
 export function isAllowedHost(hostHeader: string | undefined, allowedNames: readonly string[]): boolean {

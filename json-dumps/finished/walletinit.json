@@ -1,6 +1,0 @@
-{
-    "status": "error",
-    "error": "The wallet is already initialized",
-    "mnemonic": "",
-    "accountAddress": "0x0000000000000000000000000000000000000000"
-}
