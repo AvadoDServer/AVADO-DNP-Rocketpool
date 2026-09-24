@@ -23,15 +23,13 @@ RUN curl -fsSL --retry 3 -o /rocketpoold \
     && chmod 755 /rocketpoold
 
 ########## Backend (Task 2 owns build/backend)
-# TODO(T2-merge): enable this stage and the COPY --from=backend line below
-# once build/backend exists on this branch.
-# FROM --platform=linux/amd64 node:${NODE_VERSION}-bookworm AS backend
-# WORKDIR /usr/src/backend
-# COPY build/backend/package.json build/backend/yarn.lock ./
-# RUN yarn install --frozen-lockfile
-# COPY build/backend/ ./
-# RUN yarn build \
-#     && yarn install --frozen-lockfile --production --ignore-scripts --prefer-offline
+FROM --platform=linux/amd64 node:${NODE_VERSION}-bookworm AS backend
+WORKDIR /usr/src/backend
+COPY build/backend/package.json build/backend/yarn.lock ./
+RUN yarn install --frozen-lockfile
+COPY build/backend/ ./
+RUN yarn build \
+    && yarn install --frozen-lockfile --production --ignore-scripts --prefer-offline
 
 ########## Runtime
 FROM --platform=linux/amd64 node:${NODE_VERSION}-bookworm-slim
@@ -58,7 +56,11 @@ COPY build/scripts/ /srv/rocketpool/scripts/
 RUN chmod 755 /srv/rocketpool/entrypoint.sh /srv/rocketpool/start-node.sh /srv/rocketpool/signal-reconcile.sh /srv/rocketpool/scripts/*.sh
 COPY build/supervisord.conf /etc/supervisord.conf
 
-# TODO(T2-merge): COPY --from=backend /usr/src/backend /usr/src/backend
+COPY --from=backend /usr/src/backend /usr/src/backend
+# Build-time check: the backend build actually produced its entry point.
+RUN test -f /usr/src/backend/dist/server.js \
+    || { echo "backend build did not produce /usr/src/backend/dist/server.js"; exit 1; }
+
 # TODO(T5): the UI build goes to /usr/local/ui (served by the backend).
 
 # Build-time check: Smartnode's own config loader accepts the rendered

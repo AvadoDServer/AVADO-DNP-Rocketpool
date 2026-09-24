@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, afterEach, before, beforeEach, test } from "node:test";
 import { ABSENCE_FILE, readAbsence, updateAbsence, writeAbsence } from "../src/reconcile/absence";
-import { addApprovedKeys, APPROVED_KEYS_FILE, checkApprovalsWritable, consumeApprovals, isUsable, readApprovedKeys } from "../src/reconcile/approved";
+import {
+  addApprovedKeys,
+  APPROVED_KEYS_FILE,
+  approvedKeysPath,
+  checkApprovalsWritable,
+  consumeApprovals,
+  isUsable,
+  readApprovedKeys,
+} from "../src/reconcile/approved";
 import { startHarness, type Harness } from "./helpers";
 
 const pk = (c: string) => c.repeat(96);
@@ -95,6 +103,22 @@ test("checkApprovalsWritable: passes and leaves nothing behind; throws on a read
   } finally {
     await chmod(dir, 0o700);
   }
+});
+
+test("checkApprovalsWritable: something else occupying the exact probe path is left untouched, and the real error surfaces", async () => {
+  // The cleanup in the `finally` is best-effort (rm force:true, its own errors swallowed):
+  // it must never remove something it didn't create itself, and it must never replace the
+  // write's own error (here EISDIR: the probe path is a directory) with an unrelated one
+  // from a failed cleanup attempt.
+  const probe = `${approvedKeysPath(dir)}.probe-${process.pid}`;
+  await mkdir(probe);
+  await assert.rejects(
+    () => checkApprovalsWritable(dir),
+    (e: unknown) => e instanceof Error && (e as NodeJS.ErrnoException).code === "EISDIR",
+  );
+  // the directory that was already there is untouched
+  assert.deepEqual(await readdir(probe), []);
+  await rm(probe, { recursive: true, force: true });
 });
 
 // ---------- HTTP: approve endpoint and the node/deposit hook ----------
