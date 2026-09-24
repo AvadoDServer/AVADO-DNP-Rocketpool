@@ -39,6 +39,9 @@ test("unknown and deliberately excluded routes are 404 and never reach Smartnode
     "/api/sn/megapool/notify-validator-exit",
     "/api/sn/megapool/notify-final-balance",
     "/api/sn/service/restart-vc",
+    "/api/sn/wallet/rebuild",
+    "/api/sn/node/wait-and-stake-rpl",
+    "/api/sn/network/download-rewards-file",
     "/api/sn/odao/status",
     "/api/sn/constructor",
     "/api/sn/__proto__",
@@ -132,8 +135,8 @@ test("every allow-listed route has a valid kind", () => {
   assert.equal(ALLOWED_ROUTES["wait"]?.long, true);
 });
 
-test("long routes: waits, wallet recovery and rebuild, and node/deposit (key generation + tx) get the long timeout", () => {
-  for (const r of ["wait", "wallet/recover", "wallet/search-and-recover", "wallet/rebuild", "node/wait-and-stake-rpl", "network/download-rewards-file", "node/deposit"]) {
+test("long routes: waits, wallet recovery, and node/deposit (key generation + tx) get the long timeout", () => {
+  for (const r of ["wait", "wallet/recover", "wallet/search-and-recover", "node/deposit"]) {
     assert.equal(ALLOWED_ROUTES[r]?.long, true, r);
   }
   assert.deepEqual(ALLOWED_ROUTES["node/deposit"], { kind: "W", long: true });
@@ -144,12 +147,11 @@ test("every allow-listed write route is one the UI sends", () => {
   assert.deepEqual(writes, [
     "megapool/claim-refund", "megapool/distribute", "megapool/exit-queue", "megapool/exit-validator", "megapool/repay-debt",
     "minipool/close", "minipool/distribute-balance", "minipool/exit",
-    "network/download-rewards-file",
     "node/claim-and-stake-rewards", "node/claim-rewards", "node/claim-unclaimed-rewards", "node/deposit", "node/distribute",
     "node/provision-express-tickets", "node/register", "node/set-primary-withdrawal-address", "node/set-smoothing-pool-status",
-    "node/stake-rpl", "node/stake-rpl-approve-rpl", "node/unstake-legacy-rpl", "node/unstake-rpl", "node/wait-and-stake-rpl",
+    "node/stake-rpl", "node/stake-rpl-approve-rpl", "node/unstake-legacy-rpl", "node/unstake-rpl",
     "node/withdraw-credit", "node/withdraw-eth", "node/withdraw-rpl",
-    "wallet/export", "wallet/init", "wallet/rebuild", "wallet/recover", "wallet/search-and-recover", "wallet/set-password",
+    "wallet/export", "wallet/init", "wallet/recover", "wallet/search-and-recover", "wallet/set-password",
   ]);
 });
 

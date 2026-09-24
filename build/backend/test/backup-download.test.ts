@@ -173,7 +173,7 @@ test("the CSRF and Host guards apply; GET is refused", async () => {
   await assert.rejects(readdir(h.config.backupDir));
 });
 
-test('"current" makes a fresh, never-pruned backup (kind manual) and streams it', async () => {
+test('"current" makes a fresh backup (kind manual) and streams it', async () => {
   await seedWallet();
   const r = await download({ name: "current" });
   assert.equal(r.status, 200);
@@ -183,7 +183,7 @@ test('"current" makes a fresh, never-pruned backup (kind manual) and streams it'
   assert.match(name, /^\d{8}T\d{6}Z-manual-download$/);
   const info = JSON.parse(await readFile(path.join(h.config.backupDir, name, "backup-info.json"), "utf8"));
   assert.equal(info.kind, "manual");
-  assert.equal(info.keepForever, true);
+  assert.equal(info.keepForever, false);
   assert.deepEqual(info.items, ["wallet", "password", "validators", "address"]);
   const z = unzip(r.buf);
   assert.equal(z.get(`${name}/wallet`)!.toString(), '{"crypto":"live-wallet"}');
@@ -258,4 +258,101 @@ test("at most 2 downloads run at once; a third is refused with 429 until one fin
     for (const r of open) r.destroy();
   }
   assert.ok((await stat(path.join(b, "big.bin"))).size > 0);
+});
+
+// ---------- slots freed on early aborts; "current" reuse and manual-backup pruning ----------
+
+test("downloads the browser aborts early free their slots: two aborted, then a third succeeds", async () => {
+  await seedWallet();
+  // the daemon is slow to say the node address, so both requests are still in the handler when aborted
+  h.setUpstream(async (call) => {
+    if (call.path === "/api/wallet/status") await new Promise((r) => setTimeout(r, 300));
+    return { body: JSON.stringify({ status: "success", error: "", walletInitialized: true, passwordSet: true, nodeAddress: NODE_ADDRESS }) };
+  });
+  const abortEarly = () =>
+    new Promise<void>((resolve) => {
+      const req = http.request(`${h.base}/api/avado/backups/download`, {
+        method: "POST",
+        headers: { Host: new URL(h.base).host, Origin: h.base, "Content-Type": "application/json", "X-Avado-Request": "1" },
+      });
+      req.on("error", () => resolve());
+      req.end(JSON.stringify({ name: "current" }));
+      setTimeout(() => {
+        req.destroy();
+        resolve();
+      }, 50);
+    });
+  await Promise.all([abortEarly(), abortEarly()]);
+  await new Promise((r) => setTimeout(r, 500)); // the handlers get past the slow daemon call
+  const third = await download({ name: "current" });
+  assert.equal(third.status, 200);
+  assert.ok(unzip(third.buf).has("README.txt"));
+});
+
+test('"current" twice within 60 s streams the same backup; no second directory', async () => {
+  await seedWallet();
+  const a = await download({ name: "current" });
+  const b = await download({ name: "current" });
+  assert.equal(a.status, 200);
+  assert.equal(b.status, 200);
+  const dirs = await readdir(h.config.backupDir);
+  assert.equal(dirs.length, 1);
+  assert.ok(unzip(b.buf).has(`${dirs[0]}/wallet`));
+  assert.ok(h.logs.some((l) => l.includes(`reusing the backup made`) && l.includes(dirs[0]!)), h.logs.join("\n"));
+});
+
+const stampOf = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+
+async function seedManual(name: string, kind = "manual") {
+  await mkdir(path.join(h.config.backupDir, name), { recursive: true });
+  await writeFile(path.join(h.config.backupDir, name, "wallet"), "old");
+  await writeFile(path.join(h.config.backupDir, name, "backup-info.json"), JSON.stringify({ kind }));
+}
+
+test('"current" makes a new backup when the newest manual one is older than 60 s', async () => {
+  await seedWallet();
+  const old = `${stampOf(new Date(Date.now() - 2 * 60_000))}-manual-download`;
+  await seedManual(old);
+  const r = await download({ name: "current" });
+  assert.equal(r.status, 200);
+  const dirs = (await readdir(h.config.backupDir)).sort();
+  assert.equal(dirs.length, 2);
+  const fresh = dirs.find((d) => d !== old)!;
+  assert.ok(unzip(r.buf).has(`${fresh}/wallet`));
+});
+
+test("only the 10 newest manual backups are kept; other kinds and look-alikes are never pruned", async () => {
+  await seedWallet();
+  const base = Date.now() - 24 * 3600_000;
+  const manual: string[] = [];
+  for (let i = 0; i < 12; i++) {
+    const n = `${stampOf(new Date(base + i * 60_000))}-manual-download`;
+    manual.push(n);
+    await seedManual(n);
+  }
+  const others = [
+    "0.0.106-20200101T000000Z",
+    "20200101T000000Z-after-wallet-create",
+    "20200101T000000Z-before-wallet-change",
+    "mnemonic-archive-20200101T000000Z",
+  ];
+  for (const n of others) await seedManual(n, "package-upgrade");
+  // named like a manual backup but without kind "manual": not ours to prune
+  await seedManual("20200101T000000Z-manual-download", "package-upgrade");
+  await seedManual("20200101T000001Z-manual-download-2", "something-else");
+  // a symlink named like one is never followed or removed
+  await symlink(h.config.dataDir, path.join(h.config.backupDir, "20200101T000002Z-manual-download"));
+
+  const r = await download({ name: "current" });
+  assert.equal(r.status, 200);
+  const left = new Set(await readdir(h.config.backupDir));
+  // the new one + the 9 newest seeded manual backups
+  for (const n of manual.slice(3)) assert.ok(left.has(n), `kept ${n}`);
+  for (const n of manual.slice(0, 3)) assert.ok(!left.has(n), `pruned ${n}`);
+  assert.equal([...left].filter((n) => /-manual-download$/.test(n) && !n.startsWith("2020")).length, 10);
+  for (const n of [...others, "20200101T000000Z-manual-download", "20200101T000001Z-manual-download-2", "20200101T000002Z-manual-download"]) {
+    assert.ok(left.has(n), `untouched ${n}`);
+  }
+  // the data dir behind the symlink is untouched
+  assert.equal(await readFile(path.join(h.config.dataDir, "wallet"), "utf8"), '{"crypto":"live-wallet"}');
 });

@@ -25,7 +25,8 @@
  *     node/confirm-rpl-withdrawal-address, node/initialize-fee-distributor,
  *     node/withdraw-rpl-v131, node/set-rpl-locking-allowed, node/set-stake-rpl-for-allowed,
  *     megapool/notify-validator-exit, megapool/notify-final-balance (the daemon sends these
- *     two itself) and service/restart-vc. Every write that stays listed is one the UI sends
+ *     two itself), service/restart-vc, wallet/rebuild, node/wait-and-stake-rpl and
+ *     network/download-rewards-file (the daemon downloads rewards trees itself). Every write that stays listed is one the UI sends
  *     (checked against AVADO-Client-UI rocketpool-app and rp-simple); any other LAN device
  *     gets nothing more.
  */
@@ -57,7 +58,6 @@ export const ALLOWED_ROUTES: Readonly<Record<string, RouteSpec>> = Object.freeze
   "wallet/init": { kind: "W", secret: true },
   "wallet/recover": { kind: "W", long: true, secret: true },
   "wallet/search-and-recover": { kind: "W", long: true, secret: true },
-  "wallet/rebuild": W_LONG,
   "wallet/export": { kind: "W", secret: true },
 
   // node: status and meta
@@ -94,7 +94,6 @@ export const ALLOWED_ROUTES: Readonly<Record<string, RouteSpec>> = Object.freeze
   "node/get-stake-rpl-approval-gas": R,
   "node/stake-rpl-approve-rpl": W,
   "node/stake-rpl": W,
-  "node/wait-and-stake-rpl": W_LONG,
   "node/can-unstake-rpl": R,
   "node/unstake-rpl": W,
   "node/can-unstake-legacy-rpl": R,
@@ -183,7 +182,6 @@ export const ALLOWED_ROUTES: Readonly<Record<string, RouteSpec>> = Object.freeze
   "network/stats": R,
   "network/timezone-map": R,
   "network/latest-delegate": R,
-  "network/download-rewards-file": W_LONG,
   "queue/status": R,
   "queue/get-queue-details": R,
   "service/get-client-status": R,
