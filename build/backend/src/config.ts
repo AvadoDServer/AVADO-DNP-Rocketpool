@@ -32,7 +32,7 @@ export interface Config {
   network: string;
   /** Default upstream timeout in ms. */
   snTimeoutMs: number;
-  /** Upstream timeout for /api/wait and wallet recovery in ms. */
+  /** Upstream timeout of the `long` routes (sn/allowlist.ts: /api/wait, wallet recovery, node/deposit) in ms. */
   snLongTimeoutMs: number;
   /** CONSENSUSCLIENT package setting (nimbus, teku, lighthouse, prysm): where Rocket Pool keys go. */
   consensusClient: string | undefined;

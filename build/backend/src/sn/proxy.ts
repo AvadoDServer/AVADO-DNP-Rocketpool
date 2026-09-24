@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { createWalletBackup, WALLET_CREATE_BACKUP_REASON } from "../backup";
 import type { Config } from "../config";
 import { applyWalletGuards, readWalletState } from "../guards/wallet";
 import { HttpError, Limiter, parseParams, readBody, sendError, sendJson } from "../http-util";
@@ -10,6 +11,9 @@ import { parseBigJson } from "./bigjson";
 import { readApiToken } from "./token";
 
 export const SN_PREFIX = "/api/sn/";
+
+/** Routes after which Smartnode has saved a newly created wallet (wallet/init only generates it). */
+const WALLET_SAVE_ROUTES = new Set(["wallet/recover", "wallet/search-and-recover"]);
 
 interface Upstream {
   status: number;
@@ -135,6 +139,22 @@ export async function handleSmartnodeProxy(
           if (n > 0) logger.info(`node/deposit: ${n} new validator key(s) approved for loading`);
         } catch (e) {
           logger.error(`node/deposit: could not record the new validator keys as approved: ${String((e as Error)?.message ?? e)}`);
+        }
+      }
+      // the wallet was just saved for the first time (the guard only lets these routes run
+      // when no wallet exists): back it up now instead of at the next daemon start
+      if (WALLET_SAVE_ROUTES.has(route) && status === 200 && (body as { status?: unknown })?.status === "success") {
+        try {
+          const b = await createWalletBackup({
+            dataDir: config.dataDir,
+            backupDir: config.backupDir,
+            reason: WALLET_CREATE_BACKUP_REASON,
+            info: { kind: "wallet-create", reason: route },
+          });
+          logger.info(`${route}: wallet backed up to ${b.name}`);
+        } catch (e) {
+          // never fails the recovery itself: the wallet is already saved by the daemon
+          logger.error(`${route}: could not back up the new wallet: ${redact(String((e as Error)?.message ?? e))}`);
         }
       }
       if (!spec.secret && status >= 400) {

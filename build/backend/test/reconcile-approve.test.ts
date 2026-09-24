@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { after, afterEach, before, beforeEach, test } from "node:test";
@@ -219,4 +220,41 @@ test("node/deposit: errors, no transaction hash, or other routes approve nothing
   }
   assert.equal(await exists(approvedFile()), false);
   h.setUpstream(() => ({ body: '{"status":"success","error":""}' }));
+});
+
+test("node/deposit: a slow deposit outlives the normal timeout, and the keys are recorded even after the browser gave up", async () => {
+  // the normal write timeout is far shorter than this deposit; node/deposit gets the long one
+  const hh = await startHarness({ SN_TIMEOUT_MS: "100", SN_LONG_TIMEOUT_MS: "10000" });
+  try {
+    const answer = { status: "success", error: "", txHash: TX, validatorPubkeys: [pk("a")] };
+    hh.setUpstream(async () => {
+      await new Promise((r) => setTimeout(r, 400));
+      return { body: JSON.stringify(answer) };
+    });
+    // the browser closes the request long before the daemon answers
+    await new Promise<void>((resolve) => {
+      const req = http.request(`${hh.base}/api/sn/node/deposit`, {
+        method: "POST",
+        headers: {
+          Host: new URL(hh.base).host,
+          "Content-Type": "application/json",
+          "X-Avado-Request": "1",
+        },
+      });
+      req.on("error", () => resolve());
+      req.end(JSON.stringify({ amountWei: "4000000000000000000", submit: true }));
+      setTimeout(() => {
+        req.destroy();
+        resolve();
+      }, 50);
+    });
+    const file = path.join(hh.config.dataDir, APPROVED_KEYS_FILE);
+    for (let i = 0; i < 100 && !(await exists(file)); i++) await new Promise((r) => setTimeout(r, 20));
+    const data = JSON.parse(await readFile(file, "utf8"));
+    assert.deepEqual(Object.keys(data.keys), [pk("a")]);
+    assert.equal(data.keys[pk("a")].source, "deposit");
+    assert.ok(hh.logs.some((l) => /POST \/api\/sn\/node\/deposit 200 /.test(l)), hh.logs.join("\n"));
+  } finally {
+    await hh.close();
+  }
 });

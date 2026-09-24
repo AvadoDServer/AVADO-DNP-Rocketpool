@@ -1,4 +1,5 @@
 import type { IncomingMessage, RequestListener, ServerResponse } from "node:http";
+import { BACKUP_DOWNLOAD_LIMIT, handleBackupDownload } from "./avado/backup-download";
 import { cleanLine, parseTail, tailFile } from "./avado/logs";
 import { getAvadoStatus } from "./avado/status";
 import { archiveLegacyMnemonic } from "./backup";
@@ -27,6 +28,17 @@ export function createApp(config: Config, logger: Logger): RequestListener {
   const client = new SmartnodeClient(config, logger);
   const longLimiter = new Limiter(config.longRequestLimit);
   const logLimiter = new Limiter(config.logReadLimit);
+  const downloadLimiter = new Limiter(BACKUP_DOWNLOAD_LIMIT);
+  /** The node address from Smartnode's wallet/status (file names only); undefined when unknown. */
+  const nodeAddress = async (): Promise<string | undefined> => {
+    try {
+      const r = await client.call("wallet/status", "GET", new URLSearchParams(), { timeoutMs: 5_000 });
+      const a = (r.body as { nodeAddress?: unknown } | null)?.nodeAddress;
+      return r.status === 200 && typeof a === "string" ? a : undefined;
+    } catch {
+      return undefined;
+    }
+  };
 
   const avadoRoutes: Record<string, Handler> = {
     "/api/avado/status": method("GET", async (_req, res) => {
@@ -73,6 +85,14 @@ export function createApp(config: Config, logger: Logger): RequestListener {
         const r = await archiveLegacyMnemonic({ dataDir: config.dataDir, backupDir: config.backupDir }, body);
         logger.info(`legacy mnemonic archived to ${r.name}`);
         sendJson(res, 200, { status: "success", error: "", archived: true, name: r.name });
+      } catch (e) {
+        if (e instanceof HttpError) return sendError(res, e.statusCode, e.message);
+        throw e;
+      }
+    }),
+    "/api/avado/backups/download": method("POST", async (req, res) => {
+      try {
+        await handleBackupDownload(req, res, { config, logger, limiter: downloadLimiter, nodeAddress });
       } catch (e) {
         if (e instanceof HttpError) return sendError(res, e.statusCode, e.message);
         throw e;

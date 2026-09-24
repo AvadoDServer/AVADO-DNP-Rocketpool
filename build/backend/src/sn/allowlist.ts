@@ -17,6 +17,11 @@
  *   - megapool challenge-performance, dissolve-with-proof, verify-performance (oDAO duties)
  *   - network generate-rewards-tree, dao-proposals; queue process/assign-deposits
  *   - the odao, pdao, auction, security, debug and upgrade groups (governance is out of scope)
+ *   - write routes the AVADO UI never calls (their read routes stay): node/send, node/send-all
+ *     and node/sign-message (hot-wallet drain / arbitrary signing), node/set-rpl-withdrawal-address,
+ *     megapool stake, reduce-bond and dissolve-validator, minipool refund and rescue-dissolved,
+ *     and the megapool/minipool delegate-upgrade and set-use-latest-delegate setters. Every
+ *     write that stays listed is one the UI sends; any other LAN device gets nothing more.
  */
 
 export type RouteKind = "R" | "W";
@@ -68,7 +73,6 @@ export const ALLOWED_ROUTES: Readonly<Record<string, RouteSpec>> = Object.freeze
   "node/can-confirm-primary-withdrawal-address": R,
   "node/confirm-primary-withdrawal-address": W,
   "node/can-set-rpl-withdrawal-address": R,
-  "node/set-rpl-withdrawal-address": W,
   "node/can-confirm-rpl-withdrawal-address": R,
   "node/confirm-rpl-withdrawal-address": W,
 
@@ -109,7 +113,10 @@ export const ALLOWED_ROUTES: Readonly<Record<string, RouteSpec>> = Object.freeze
   "node/can-provision-express-tickets": R,
   "node/provision-express-tickets": W,
   "node/can-deposit": R,
-  "node/deposit": W,
+  // long: Smartnode creates and saves the validator keys (4 keystore formats each) and
+  // sends the transaction before it answers. The backend must still see that answer, or
+  // the new keys are never recorded as approved for loading (sn/proxy.ts).
+  "node/deposit": W_LONG,
 
   // node: rewards, credit, sending
   "node/rewards": R,
@@ -125,9 +132,6 @@ export const ALLOWED_ROUTES: Readonly<Record<string, RouteSpec>> = Object.freeze
   "node/can-withdraw-eth": R,
   "node/withdraw-eth": W,
   "node/can-send": R,
-  "node/send": W,
-  "node/send-all": W,
-  "node/sign-message": W,
 
   // megapool
   "megapool/status": R,
@@ -140,7 +144,6 @@ export const ALLOWED_ROUTES: Readonly<Record<string, RouteSpec>> = Object.freeze
   "megapool/get-effective-delegate": R,
   "megapool/get-use-latest-delegate": R,
   "megapool/can-stake": R,
-  "megapool/stake": W,
   "megapool/can-exit-queue": R,
   "megapool/exit-queue": W,
   "megapool/can-exit-validator": R,
@@ -156,13 +159,9 @@ export const ALLOWED_ROUTES: Readonly<Record<string, RouteSpec>> = Object.freeze
   "megapool/can-repay-debt": R,
   "megapool/repay-debt": W,
   "megapool/can-reduce-bond": R,
-  "megapool/reduce-bond": W,
   "megapool/can-dissolve-validator": R,
-  "megapool/dissolve-validator": W,
   "megapool/can-delegate-upgrade": R,
-  "megapool/delegate-upgrade": W,
   "megapool/can-set-use-latest-delegate": R,
-  "megapool/set-use-latest-delegate": W,
 
   // minipools (existing fleet)
   "minipool/status": R,
@@ -173,17 +172,13 @@ export const ALLOWED_ROUTES: Readonly<Record<string, RouteSpec>> = Object.freeze
   "minipool/get-minipool-close-details-for-node": R,
   "minipool/close": W,
   "minipool/can-refund": R,
-  "minipool/refund": W,
   "minipool/get-delegate": R,
   "minipool/get-effective-delegate": R,
   "minipool/get-previous-delegate": R,
   "minipool/get-use-latest-delegate": R,
   "minipool/can-delegate-upgrade": R,
-  "minipool/delegate-upgrade": W,
   "minipool/can-set-use-latest-delegate": R,
-  "minipool/set-use-latest-delegate": W,
   "minipool/get-rescue-dissolved-details-for-node": R,
-  "minipool/rescue-dissolved": W,
 
   // network, queue, service
   "network/node-fee": R,

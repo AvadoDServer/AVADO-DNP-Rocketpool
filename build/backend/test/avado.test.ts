@@ -102,7 +102,7 @@ test("status includes settings (auto-tx thresholds) when the rendered settings f
     [
       "smartnode:",
       '  manualMaxFee: "0"',
-      '  priorityFee: "0.01"',
+      '  priorityFee: "1"',
       '  minipoolStakeGasThreshold: "20"',
       '  distributeThreshold: "1"',
       "",
@@ -116,7 +116,7 @@ test("status includes settings (auto-tx thresholds) when the rendered settings f
       autoTxGasThreshold: "20",
       minipoolStakeGasThreshold: "20",
       manualMaxFee: "0",
-      priorityFee: "0.01",
+      priorityFee: "1",
       distributeThreshold: "1",
       units: {
         autoTxGasThreshold: "gwei",

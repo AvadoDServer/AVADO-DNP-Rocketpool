@@ -6,15 +6,40 @@ import { HttpError } from "./http-util";
 
 /**
  * Shared wallet backup. Copies (never moves) the hot wallet, its password, the
- * validator keystores and the legacy plaintext `mnemonic` (if present) into
+ * validator keystores, the legacy plaintext `mnemonic`, and Smartnode's `address`,
+ * `custom-keys/` and `custom-key-passwords` (each if present) into
  * <backupDir>/<UTC timestamp>-<reason>/ and verifies every copied file byte for byte.
  * The originals are only read. Throws when the backup is incomplete; a partial
  * backup directory is removed so it is never mistaken for a good one.
+ *
+ * With `info`, a backup-info.json {kind, reason, keepForever: true, createdAt, items}
+ * (mode 0600) is written too. None of these directories is ever pruned: pruning
+ * (build/scripts/lib.sh) only removes `<version>-<ts>` directories whose
+ * backup-info.json has kind "package-upgrade".
  */
 
-export const WALLET_BACKUP_ITEMS = ["wallet", "password", "validators", "mnemonic"] as const;
+export const WALLET_BACKUP_ITEMS = [
+  "wallet",
+  "password",
+  "validators",
+  "mnemonic",
+  "address",
+  "custom-keys",
+  "custom-key-passwords",
+] as const;
 /** Items that must exist for a wallet backup to count. */
 const REQUIRED_ITEMS = new Set(["wallet"]);
+
+/** Thrown when there is no wallet to back up (nothing is created). */
+export class NoWalletError extends Error {
+  constructor() {
+    super("Nothing to back up: wallet not found");
+    this.name = "NoWalletError";
+  }
+}
+
+/** Backup kinds written by the backend (backup-info.json `kind`). */
+export type BackendBackupKind = "wallet-create" | "manual";
 
 export interface WalletBackupResult {
   /** Directory name inside backupDir. */
@@ -55,6 +80,8 @@ export async function createWalletBackup(opts: {
   backupDir: string;
   reason: string;
   now?: Date;
+  /** Writes backup-info.json with this kind and reason (keepForever: true). */
+  info?: { kind: BackendBackupKind; reason: string };
 }): Promise<WalletBackupResult> {
   const reason = opts.reason.replace(/[^a-z0-9-]/gi, "-");
   await mkdir(opts.backupDir, { recursive: true, mode: 0o700 });
@@ -69,7 +96,7 @@ export async function createWalletBackup(opts: {
     for (const item of WALLET_BACKUP_ITEMS) {
       const src = path.join(opts.dataDir, item);
       if (!(await exists(src))) {
-        if (REQUIRED_ITEMS.has(item)) throw new Error(`Nothing to back up: ${item} not found`);
+        if (REQUIRED_ITEMS.has(item)) throw new NoWalletError();
         continue;
       }
       const dest = path.join(target, item);
@@ -90,6 +117,16 @@ export async function createWalletBackup(opts: {
       }
       copied.push(item);
     }
+    if (opts.info) {
+      const info = {
+        kind: opts.info.kind,
+        reason: opts.info.reason,
+        keepForever: true,
+        createdAt: (opts.now ?? new Date()).toISOString(),
+        items: copied,
+      };
+      await writeFile(path.join(target, "backup-info.json"), JSON.stringify(info, null, 2) + "\n", { mode: 0o600 });
+    }
   } catch (err) {
     // only ever removes the directory this call just created, never the originals
     await rm(target, { recursive: true, force: true });
@@ -101,7 +138,26 @@ export async function createWalletBackup(opts: {
 export interface BackupInfo {
   name: string;
   createdAt: string;
-  kind: "wallet-change" | "upgrade" | "mnemonic-archive";
+  /**
+   * "upgrade": start-node.sh's package-upgrade backups (`<version>-<ts>`).
+   * "wallet-change": `<ts>-before-wallet-change` (legacy name, kept for older dirs).
+   * "wallet-create": `<ts>-after-wallet-create`, made right after the wallet is first saved.
+   * "manual": `<ts>-manual-download`, made for POST /api/avado/backups/download {name:"current"}.
+   * "mnemonic-archive": `mnemonic-archive-<ts>`.
+   */
+  kind: "wallet-change" | "wallet-create" | "manual" | "upgrade" | "mnemonic-archive";
+}
+
+/** Directory-name suffixes of the backend's own backups. */
+export const WALLET_CREATE_BACKUP_REASON = "after-wallet-create";
+export const MANUAL_BACKUP_REASON = "manual-download";
+
+function kindOf(name: string): BackupInfo["kind"] {
+  if (name.startsWith("mnemonic-archive-")) return "mnemonic-archive";
+  if (name.includes("before-wallet-change")) return "wallet-change";
+  if (/^\d{8}T\d{6}Z-after-wallet-create(-\d+)?$/.test(name)) return "wallet-create";
+  if (/^\d{8}T\d{6}Z-manual-download(-\d+)?$/.test(name)) return "manual";
+  return "upgrade";
 }
 
 /** Lists backup directories, newest first. Only names and times; never contents. */
@@ -121,11 +177,7 @@ export async function listBackups(backupDir: string): Promise<BackupInfo[]> {
       out.push({
         name,
         createdAt: st.mtime.toISOString(),
-        kind: name.includes("before-wallet-change")
-          ? "wallet-change"
-          : name.startsWith("mnemonic-archive-")
-            ? "mnemonic-archive"
-            : "upgrade",
+        kind: kindOf(name),
       });
     } catch {
       // vanished while listing

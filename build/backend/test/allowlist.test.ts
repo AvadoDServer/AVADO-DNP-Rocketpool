@@ -15,6 +15,20 @@ test("unknown and deliberately excluded routes are 404 and never reach Smartnode
     "/api/sn/wallet/test-recover",
     "/api/sn/wallet/test-search-and-recover",
     "/api/sn/node/sign",
+    // write routes the UI never calls
+    "/api/sn/node/send",
+    "/api/sn/node/send-all",
+    "/api/sn/node/sign-message",
+    "/api/sn/node/set-rpl-withdrawal-address",
+    "/api/sn/megapool/stake",
+    "/api/sn/megapool/reduce-bond",
+    "/api/sn/megapool/dissolve-validator",
+    "/api/sn/megapool/delegate-upgrade",
+    "/api/sn/megapool/set-use-latest-delegate",
+    "/api/sn/minipool/refund",
+    "/api/sn/minipool/delegate-upgrade",
+    "/api/sn/minipool/set-use-latest-delegate",
+    "/api/sn/minipool/rescue-dissolved",
     "/api/sn/odao/status",
     "/api/sn/constructor",
     "/api/sn/__proto__",
@@ -106,4 +120,17 @@ test("every allow-listed route has a valid kind", () => {
     assert.equal(ALLOWED_ROUTES[secret]?.secret, true, secret);
   }
   assert.equal(ALLOWED_ROUTES["wait"]?.long, true);
+});
+
+test("long routes: waits, wallet recovery and rebuild, and node/deposit (key generation + tx) get the long timeout", () => {
+  for (const r of ["wait", "wallet/recover", "wallet/search-and-recover", "wallet/rebuild", "node/wait-and-stake-rpl", "network/download-rewards-file", "node/deposit"]) {
+    assert.equal(ALLOWED_ROUTES[r]?.long, true, r);
+  }
+  assert.deepEqual(ALLOWED_ROUTES["node/deposit"], { kind: "W", long: true });
+});
+
+test("the read routes of removed writes stay available", () => {
+  for (const r of ["node/can-send", "megapool/can-stake", "megapool/can-reduce-bond", "megapool/can-dissolve-validator", "minipool/can-refund", "node/can-set-rpl-withdrawal-address"]) {
+    assert.deepEqual(ALLOWED_ROUTES[r], { kind: "R" }, r);
+  }
 });

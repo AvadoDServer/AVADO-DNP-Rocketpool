@@ -53,8 +53,8 @@ test("isAllowedHost: box names, IP literals and localhost pass; anything else fa
   }
 });
 
-test("reviewer repro: DNS-rebound POST node/send-all is refused before anything else", async () => {
-  const r = await h.request("POST", "/api/sn/node/send-all", {
+test("reviewer repro: DNS-rebound POST node/withdraw-eth is refused before anything else", async () => {
+  const r = await h.request("POST", "/api/sn/node/withdraw-eth", {
     headers: {
       Host: "evil.example",
       Origin: "http://evil.example",
@@ -62,7 +62,7 @@ test("reviewer repro: DNS-rebound POST node/send-all is refused before anything 
       "Sec-Fetch-Site": "same-origin",
       "Content-Type": "application/x-www-form-urlencoded",
     },
-    body: "to=0xEvil&token=eth",
+    body: "amount=1000000000000000000",
   });
   assert.equal(r.status, 421);
   assert.equal(h.calls.length, 0);

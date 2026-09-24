@@ -29,8 +29,11 @@ smartnode:
   dataPath: ${SN_DATA_PATH}
   # Gas (gwei). manualMaxFee 0 = use the network estimate; the backend always
   # sends an explicit maxFee for transactions the owner confirms.
+  # priorityFee is the tip (gwei) of the daemon's own transactions. 1 gwei, the
+  # same tip the UI uses, so an automatic transaction doesn't sit in the mempool
+  # and hold up the owner's transactions behind its nonce.
   manualMaxFee: "0"
-  priorityFee: "0.01"
+  priorityFee: "1"
   # "Automatic TX Gas Threshold": the daemon's own transactions (stake,
   # auto-distribute, set-latest-delegate, express tickets, ...) wait until the
   # estimated max fee is below this. The daemon default is 150.
