@@ -23,7 +23,6 @@ test("unknown and deliberately excluded routes are 404 and never reach Smartnode
     "/api/sn/megapool/stake",
     "/api/sn/megapool/reduce-bond",
     "/api/sn/megapool/dissolve-validator",
-    "/api/sn/megapool/delegate-upgrade",
     "/api/sn/megapool/set-use-latest-delegate",
     "/api/sn/minipool/refund",
     "/api/sn/minipool/delegate-upgrade",
@@ -145,7 +144,7 @@ test("long routes: waits, wallet recovery, and node/deposit (key generation + tx
 test("every allow-listed write route is one the UI sends", () => {
   const writes = Object.entries(ALLOWED_ROUTES).filter(([, v]) => v.kind === "W").map(([k]) => k).sort();
   assert.deepEqual(writes, [
-    "megapool/claim-refund", "megapool/distribute", "megapool/exit-queue", "megapool/exit-validator", "megapool/repay-debt",
+    "megapool/claim-refund", "megapool/delegate-upgrade", "megapool/distribute", "megapool/exit-queue", "megapool/exit-validator", "megapool/repay-debt",
     "minipool/close", "minipool/distribute-balance", "minipool/exit",
     "node/claim-and-stake-rewards", "node/claim-rewards", "node/claim-unclaimed-rewards", "node/deposit", "node/distribute",
     "node/provision-express-tickets", "node/register", "node/set-primary-withdrawal-address", "node/set-smoothing-pool-status",
@@ -153,6 +152,13 @@ test("every allow-listed write route is one the UI sends", () => {
     "node/withdraw-credit", "node/withdraw-eth", "node/withdraw-rpl",
     "wallet/export", "wallet/init", "wallet/recover", "wallet/search-and-recover", "wallet/set-password",
   ]);
+});
+
+test("megapool delegate upgrade: its read and write routes are allowed (the UI offers it)", () => {
+  assert.deepEqual(ALLOWED_ROUTES["megapool/can-delegate-upgrade"], { kind: "R" });
+  assert.deepEqual(ALLOWED_ROUTES["megapool/delegate-upgrade"], { kind: "W" });
+  assert.deepEqual(ALLOWED_ROUTES["megapool/get-delegate"], { kind: "R" });
+  assert.deepEqual(ALLOWED_ROUTES["megapool/get-effective-delegate"], { kind: "R" });
 });
 
 test("the read routes of removed writes stay available", () => {

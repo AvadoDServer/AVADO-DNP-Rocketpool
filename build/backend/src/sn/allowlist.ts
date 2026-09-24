@@ -20,7 +20,7 @@
  *   - write routes the AVADO UI never calls (their read routes stay): node/send, node/send-all
  *     and node/sign-message (hot-wallet drain / arbitrary signing), node/set-rpl-withdrawal-address,
  *     megapool stake, reduce-bond and dissolve-validator, minipool refund and rescue-dissolved,
- *     the megapool/minipool delegate-upgrade and set-use-latest-delegate setters,
+ *     minipool/delegate-upgrade and the megapool/minipool set-use-latest-delegate setters,
  *     node/set-timezone, node/confirm-primary-withdrawal-address,
  *     node/confirm-rpl-withdrawal-address, node/initialize-fee-distributor,
  *     node/withdraw-rpl-v131, node/set-rpl-locking-allowed, node/set-stake-rpl-for-allowed,
@@ -157,6 +157,7 @@ export const ALLOWED_ROUTES: Readonly<Record<string, RouteSpec>> = Object.freeze
   "megapool/can-reduce-bond": R,
   "megapool/can-dissolve-validator": R,
   "megapool/can-delegate-upgrade": R,
+  "megapool/delegate-upgrade": W,
   "megapool/can-set-use-latest-delegate": R,
 
   // minipools (existing fleet)
