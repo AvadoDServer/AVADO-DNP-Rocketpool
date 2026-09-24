@@ -45,11 +45,13 @@ Every backup is a directory in `/rocketpool/backups`, mode 700, with byte-for-by
 |---|---|---|---|
 | `<old version>-<YYYYMMDDTHHMMSSZ>` (`legacy-<ts>` for a 0.0.x install without a version marker) | `start-node.sh`, before the daemon starts, when the package version or the wallet fingerprint changed | `package-upgrade` | The newest 3 are kept. `"keepForever": true` ones are never pruned and don't count toward the 3: the first upgrade backup, and the first upgrade from a pre-1.0 install. |
 | `<ts>-after-wallet-create` | the backend, right after `wallet/recover` or `wallet/search-and-recover` first saves a wallet | `wallet-create`, `keepForever: true` | never |
-| `<ts>-manual-download` | the backend, when the owner downloads the current wallet | `manual`, `keepForever: true` | never |
+| `<ts>-manual-download` | the backend, when the owner downloads the current wallet | `manual` | The backend keeps the 10 newest manual backups and removes older ones (only kind `manual`). |
 | `<ts>-before-wallet-change` | older builds | none | never |
 | `mnemonic-archive-<ts>` | the owner, archiving 0.0.x's plaintext `mnemonic` file (copied, verified, then removed) | `mnemonic-archive` | never |
 
-Pruning only ever removes `<version>-<ts>` directories whose `backup-info.json` has kind `package-upgrade`.
+`start-node.sh` only ever prunes `<version>-<ts>` directories whose `backup-info.json` has kind
+`package-upgrade`; the backend only ever prunes `<ts>-manual-download` directories whose `backup-info.json`
+has kind `manual`.
 A failed upgrade backup (for example a full disk) stops the daemon (exit 78) and the UI shows why.
 
 `GET /api/avado/status` lists the backups (`name`, `createdAt`, `kind`). The owner can download one:
@@ -64,7 +66,8 @@ X-Avado-Request: 1
 
 The answer is a zip (`Content-Disposition: attachment; filename="avado-rocketpool-backup-<first 8 hex of
 the node address>-<YYYYMMDD>.zip"`) with a `README.txt` on restoring, and the backup directory. `"current"`
-first makes a fresh `<ts>-manual-download` backup. Names are matched against the actual directory list;
+first makes a fresh `<ts>-manual-download` backup; within 60 s of the newest one it sends that one
+instead of making another. Names are matched against the actual directory list;
 anything else is 404. At most 2 downloads run at once (429 otherwise). The zip holds the wallet and its
 password: whoever has it controls the node wallet.
 

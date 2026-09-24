@@ -1,5 +1,5 @@
 import type { IncomingMessage, RequestListener, ServerResponse } from "node:http";
-import { BACKUP_DOWNLOAD_LIMIT, handleBackupDownload } from "./avado/backup-download";
+import { BACKUP_DOWNLOAD_LIMIT, createDownloadState, handleBackupDownload } from "./avado/backup-download";
 import { cleanLine, parseTail, tailFile } from "./avado/logs";
 import { getAvadoStatus } from "./avado/status";
 import { archiveLegacyMnemonic } from "./backup";
@@ -29,6 +29,7 @@ export function createApp(config: Config, logger: Logger): RequestListener {
   const longLimiter = new Limiter(config.longRequestLimit);
   const logLimiter = new Limiter(config.logReadLimit);
   const downloadLimiter = new Limiter(BACKUP_DOWNLOAD_LIMIT);
+  const downloadState = createDownloadState();
   /** The node address from Smartnode's wallet/status (file names only); undefined when unknown. */
   const nodeAddress = async (): Promise<string | undefined> => {
     try {
@@ -92,7 +93,7 @@ export function createApp(config: Config, logger: Logger): RequestListener {
     }),
     "/api/avado/backups/download": method("POST", async (req, res) => {
       try {
-        await handleBackupDownload(req, res, { config, logger, limiter: downloadLimiter, nodeAddress });
+        await handleBackupDownload(req, res, { config, logger, limiter: downloadLimiter, state: downloadState, nodeAddress });
       } catch (e) {
         if (e instanceof HttpError) return sendError(res, e.statusCode, e.message);
         throw e;

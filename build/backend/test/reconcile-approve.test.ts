@@ -211,7 +211,7 @@ test("node/deposit: errors, no transaction hash, or other routes approve nothing
     ["node/deposit", { status: "success", error: "", validatorPubkeys: [pk("8")] }],
     // a dry run (submit=false) also answers with a transaction hash, but saves no keys
     ["node/deposit#dry", { status: "success", error: "", txHash: TX, validatorPubkeys: [pk("8")] }],
-    ["wallet/rebuild", { status: "success", error: "", txHash: TX, validatorPubkeys: [pk("8")], validatorKeys: [pk("8")] }],
+    ["node/stake-rpl", { status: "success", error: "", txHash: TX, validatorPubkeys: [pk("8")], validatorKeys: [pk("8")] }],
   ];
   for (const [route, body, code] of cases) {
     h.setUpstream(() => ({ status: code ?? 200, body: JSON.stringify(body) }));

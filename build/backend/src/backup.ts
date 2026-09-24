@@ -12,10 +12,10 @@ import { HttpError } from "./http-util";
  * The originals are only read. Throws when the backup is incomplete; a partial
  * backup directory is removed so it is never mistaken for a good one.
  *
- * With `info`, a backup-info.json {kind, reason, keepForever: true, createdAt, items}
- * (mode 0600) is written too. None of these directories is ever pruned: pruning
- * (build/scripts/lib.sh) only removes `<version>-<ts>` directories whose
- * backup-info.json has kind "package-upgrade".
+ * With `info`, a backup-info.json {kind, reason, keepForever, createdAt, items} (mode
+ * 0600) is written too. build/scripts/lib.sh only prunes `<version>-<ts>` directories
+ * with kind "package-upgrade"; the download endpoint only prunes its own kind "manual"
+ * backups (avado/backup-download.ts).
  */
 
 export const WALLET_BACKUP_ITEMS = [
@@ -80,8 +80,8 @@ export async function createWalletBackup(opts: {
   backupDir: string;
   reason: string;
   now?: Date;
-  /** Writes backup-info.json with this kind and reason (keepForever: true). */
-  info?: { kind: BackendBackupKind; reason: string };
+  /** Writes backup-info.json with this kind and reason (keepForever defaults to true). */
+  info?: { kind: BackendBackupKind; reason: string; keepForever?: boolean };
 }): Promise<WalletBackupResult> {
   const reason = opts.reason.replace(/[^a-z0-9-]/gi, "-");
   await mkdir(opts.backupDir, { recursive: true, mode: 0o700 });
@@ -121,7 +121,7 @@ export async function createWalletBackup(opts: {
       const info = {
         kind: opts.info.kind,
         reason: opts.info.reason,
-        keepForever: true,
+        keepForever: opts.info.keepForever ?? true,
         createdAt: (opts.now ?? new Date()).toISOString(),
         items: copied,
       };
