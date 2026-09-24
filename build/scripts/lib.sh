@@ -307,7 +307,7 @@ backup_if_needed() {
         local dest="$BACKUP_ROOT/$name"
         local tmp="$BACKUP_ROOT/.partial-$name"
         if [ "$reason" = "wallet-changed" ]; then
-            log "Wallet files changed since the last start of $PACKAGE_VERSION: backing up to $dest"
+            log "Backed up the wallet after it changed (e.g. new validator keys) to $dest"
         else
             log "Package version changed (${old:-none} -> $PACKAGE_VERSION): backing up to $dest"
         fi

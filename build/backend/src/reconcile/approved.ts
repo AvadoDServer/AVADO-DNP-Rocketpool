@@ -134,12 +134,18 @@ export function addApprovedKeys(dataDir: string, pubkeys: unknown[], source: App
 
 /**
  * Throws when the approval state could not be saved: writes and removes a probe file next to
- * the list (only the probe this function created is ever removed).
+ * the list (only the probe this function created is ever removed). The removal is a best
+ * effort in a `finally`: it always runs, whether the write succeeded or not (so a probe left
+ * by a write that failed partway through, e.g. the disk filling up mid-write, doesn't linger),
+ * and a failure to remove it never masks the write's own error.
  */
 export async function checkApprovalsWritable(dataDir: string): Promise<void> {
   const probe = `${approvedKeysPath(dataDir)}.probe-${process.pid}`;
-  await writeFile(probe, "probe\n", { mode: 0o600 });
-  await rm(probe, { force: true });
+  try {
+    await writeFile(probe, "probe\n", { mode: 0o600 });
+  } finally {
+    await rm(probe, { force: true }).catch(() => undefined);
+  }
 }
 
 /** Marks unused approvals of these keys as used (the keys were seen loaded). */

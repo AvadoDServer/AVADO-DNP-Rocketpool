@@ -1,6 +1,7 @@
 import type { IncomingMessage, RequestListener, ServerResponse } from "node:http";
 import { cleanLine, parseTail, tailFile } from "./avado/logs";
 import { getAvadoStatus } from "./avado/status";
+import { archiveLegacyMnemonic } from "./backup";
 import type { Config } from "./config";
 import { checkCsrf, isSafeMethod } from "./csrf";
 import { isAllowedHost } from "./host";
@@ -53,6 +54,25 @@ export function createApp(config: Config, logger: Logger): RequestListener {
         const r = await approveKeysForLoading(config, body);
         logger.info(`reconcile: owner approved ${r.approved} validator key(s) for loading (${r.added} new)`);
         sendJson(res, 202, { status: "success", error: "", ...r, runRequested: true });
+      } catch (e) {
+        if (e instanceof HttpError) return sendError(res, e.statusCode, e.message);
+        throw e;
+      }
+    }),
+    "/api/avado/legacy-mnemonic/archive": method("POST", async (req, res) => {
+      const type = (req.headers["content-type"] || "").split(";")[0]!.trim().toLowerCase();
+      if (type !== "application/json") return sendError(res, 415, "Use application/json");
+      let body: unknown;
+      try {
+        body = JSON.parse((await readBody(req)).toString("utf8"));
+      } catch (e) {
+        if (e instanceof HttpError) return sendError(res, e.statusCode, e.message);
+        return sendError(res, 400, "Invalid JSON body");
+      }
+      try {
+        const r = await archiveLegacyMnemonic({ dataDir: config.dataDir, backupDir: config.backupDir }, body);
+        logger.info(`legacy mnemonic archived to ${r.name}`);
+        sendJson(res, 200, { status: "success", error: "", archived: true, name: r.name });
       } catch (e) {
         if (e instanceof HttpError) return sendError(res, e.statusCode, e.message);
         throw e;
