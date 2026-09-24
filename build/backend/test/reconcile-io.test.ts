@@ -302,6 +302,9 @@ test("end to end: imports into the chosen client from disk; the other client onl
       configuredClient: "teku",
       importAttempts: new Map(),
       trigger: "request",
+      // a fixed clock: pk("2") is a deposit key approved 1 h ago, so it is still inside the
+      // 24 h deposit exemption from settling (the test must not depend on today's date)
+      now: () => new Date("2026-09-23T10:00:00Z"),
     };
     const s = await runReconcile(deps);
     assert.equal(s.keys.summary, "2/3");

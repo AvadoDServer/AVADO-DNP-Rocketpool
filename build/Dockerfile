@@ -4,7 +4,13 @@
 # dockerfile "build/Dockerfile"), so the image can read the package version
 # from dappnode_package.json. See /.dockerignore for what is sent.
 
-ARG NODE_VERSION=22.23.2
+# Base images, pinned by digest (the multi-arch index digest, so the UI stage
+# can still run on the build host's platform). The tag is only a label; the
+# digest decides. Update tag and digest together: get the digest with
+# `docker buildx imagetools inspect node:<tag>` (the "Digest:" line).
+# Checked 2026-09-24. build/tests/run.sh runs the same slim image by tag.
+ARG NODE_IMAGE=node:22.23.2-bookworm@sha256:dd5847a04b0deee391fa145f1f4c6d214196668b6bcc7988ebed67249f226844
+ARG NODE_SLIM_IMAGE=node:22.23.2-bookworm-slim@sha256:48e4b67d85f87bd551df43704e24d252f56cc5f8e9718841aace50f19948f0f9
 # Where the Rocket Pool UI comes from: "git" (default, every release) clones
 # AVADO-Client-UI at CLIENT_UI_VERSION and runs `yarn build:rocketpool`;
 # "local" takes a prebuilt dist from build/client-ui-dist/
@@ -13,7 +19,7 @@ ARG CLIENT_UI_SOURCE=git
 
 ########## Rocket Pool UI (https://github.com/AvadoDServer/AVADO-Client-UI)
 # Static files only, so this stage runs on the build host's platform.
-FROM node:${NODE_VERSION}-bookworm-slim AS ui-git
+FROM ${NODE_SLIM_IMAGE} AS ui-git
 ARG CLIENT_UI_VERSION=v0.2.0
 ARG CLIENT_UI_REPO=https://github.com/AvadoDServer/AVADO-Client-UI
 RUN apt-get update \
@@ -23,13 +29,13 @@ RUN git clone --depth 1 --branch ${CLIENT_UI_VERSION} ${CLIENT_UI_REPO} /ui
 WORKDIR /ui
 RUN yarn install --frozen-lockfile && yarn build:rocketpool
 
-FROM node:${NODE_VERSION}-bookworm-slim AS ui-local
+FROM ${NODE_SLIM_IMAGE} AS ui-local
 COPY build/client-ui-dist /ui/dist-rocketpool
 
 FROM ui-${CLIENT_UI_SOURCE} AS ui
 
 ########## Smartnode daemon: download and verify
-FROM --platform=linux/amd64 node:${NODE_VERSION}-bookworm AS smartnode
+FROM --platform=linux/amd64 ${NODE_IMAGE} AS smartnode
 ARG RP_VERSION=v1.24.2
 # sha256 of rocketpool-daemon-linux-amd64 from rocket-pool/smartnode release
 # v1.24.2: the asset digest GitHub publishes for the release (checked with
@@ -45,16 +51,25 @@ RUN curl -fsSL --retry 3 -o /rocketpoold \
     && chmod 755 /rocketpoold
 
 ########## Backend (Task 2 owns build/backend)
-FROM --platform=linux/amd64 node:${NODE_VERSION}-bookworm AS backend
+FROM --platform=linux/amd64 ${NODE_IMAGE} AS backend
 WORKDIR /usr/src/backend
 COPY build/backend/package.json build/backend/yarn.lock ./
 RUN yarn install --frozen-lockfile
 COPY build/backend/ ./
+# The backend test suite runs here: a failing test fails the image build, so a
+# release can never be built on a red suite.
+RUN yarn test
+# Only what the runtime needs goes into /out: package.json, the compiled
+# server and production dependencies. Test sources, compiled tests and their
+# fixtures stay in this stage and never reach the image.
 RUN yarn build \
-    && yarn install --frozen-lockfile --production --ignore-scripts --prefer-offline
+    && yarn install --frozen-lockfile --production --ignore-scripts --prefer-offline \
+    && mkdir -p /out \
+    && cp -a package.json dist /out/ \
+    && if [ -d node_modules ]; then cp -a node_modules /out/; fi
 
 ########## Runtime
-FROM --platform=linux/amd64 node:${NODE_VERSION}-bookworm-slim
+FROM --platform=linux/amd64 ${NODE_SLIM_IMAGE}
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates gettext-base supervisor \
@@ -78,7 +93,7 @@ COPY build/scripts/ /srv/rocketpool/scripts/
 RUN chmod 755 /srv/rocketpool/entrypoint.sh /srv/rocketpool/start-node.sh /srv/rocketpool/signal-reconcile.sh /srv/rocketpool/scripts/*.sh
 COPY build/supervisord.conf /etc/supervisord.conf
 
-COPY --from=backend /usr/src/backend /usr/src/backend
+COPY --from=backend /out /usr/src/backend
 # Build-time check: the backend build actually produced its entry point.
 RUN test -f /usr/src/backend/dist/server.js \
     || { echo "backend build did not produce /usr/src/backend/dist/server.js"; exit 1; }
