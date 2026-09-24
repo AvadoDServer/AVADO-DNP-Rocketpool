@@ -34,19 +34,14 @@ git push
 npx release-it
 ```
 
-## Prater testnet
+## Web UI
 
+The UI is the Rocket Pool app of [AVADO-Client-UI](https://github.com/AvadoDServer/AVADO-Client-UI)
+(`yarn build:rocketpool`), built in `build/Dockerfile` from the tag in `CLIENT_UI_VERSION` and served
+by the backend (`build/backend`) from `/usr/local/ui`.
 
-Add Goerli RPL to metamask: contract 0x5e932688e81a182e3de211db6544f98b8e4f89c7
+Test builds of an unreleased UI: `scripts/stage-local-client-ui.sh /path/to/AVADO-Client-UI`, then
+`docker compose build --build-arg CLIENT_UI_SOURCE=local`. Releases always use the pinned tag.
 
-
-
-
-
-
-
-
-
-
-
-
+Boot test of a built image: `build/tests/boot-test.sh` (set `BOOT_OLD_DAEMON` to a Smartnode v1.13.5
+`rocketpoold` binary to test with a wallet made the way package 0.0.106 made it).

@@ -2,8 +2,6 @@
 *
 !dappnode_package.json
 !build/
-build/wizard
-build/monitor
 build/tests
 **/node_modules
 **/dist

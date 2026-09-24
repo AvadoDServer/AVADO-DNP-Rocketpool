@@ -1,6 +1,0 @@
-{
-    "status": "error",
-    "error": "The node is not registered with Rocket Pool. Please run 'rocketpool node register' and try again.",
-    "minipools": null,
-    "latestDelegate": "0x0000000000000000000000000000000000000000"
-}
