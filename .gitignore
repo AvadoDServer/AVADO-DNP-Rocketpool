@@ -1,3 +1,6 @@
 # DAppNodeSDK release directories
 build_*
 releases.json
+# Prebuilt Rocket Pool UI for CLIENT_UI_SOURCE=local test builds (scripts/stage-local-client-ui.sh)
+build/client-ui-dist/*
+!build/client-ui-dist/.gitkeep

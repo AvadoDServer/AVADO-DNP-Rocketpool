@@ -1,204 +1,56 @@
-addons-gww:
-  additionalFlags: ""
-  containerTag: rocketpool/graffiti-wall-addon:v0.1.0
-  enabled: "false"
-  inputUrl: https://cdn-rocketpool.s3.us-west-2.amazonaws.com/graffiti.json
-  updateInputTime: "600"
-  updatePixelTime: "60"
-  updateWallTime: "600"
-addons-rescue-node:
-  enabled: "false"
-  password: ""
-  username: ""
-besu:
-  additionalFlags: ""
-  archiveMode: "false"
-  containerTag: hyperledger/besu:22.4.1-openjdk-latest
-  jvmHeapSize: "0"
-  maxBackLayers: "512"
-  maxPeers: "25"
-bitflyNodeMetrics:
-  bitflyEndpoint: https://beaconcha.in/api/v1/client/metrics
-  bitflyMachineName: Smartnode
-  bitflySecret: ""
-consensusCommon:
-  apiPort: "5052"
-  checkpointSyncUrl: ""
-  doppelgangerDetection: "true"
-  graffiti: ""
-  openApiPort: closed
-  p2pPort: "9001"
-executionCommon:
-  enginePort: "8551"
-  ethstatsLabel: ""
-  ethstatsLogin: ""
-  httpPort: "8545"
-  openRpcPorts: closed
-  p2pPort: "30303"
-  wsPort: "8546"
-exporter:
-  additionalFlags: ""
-  containerTag: prom/node-exporter:v1.3.1
-  enableRootFs: "false"
-externalExecution:
-  httpUrl: ${ECHTTPURL}
-  wsUrl: ${ECWSURL}
-externalLighthouse:
-  additionalVcFlags: ""
-  containerTag: sigp/lighthouse:v2.1.5
-  doppelgangerDetection: "true"
-  graffiti: ""
-  httpUrl: ${BCHTTPURL}
-externalLodestar:
-  additionalVcFlags: ""
-  containerTag: chainsafe/lodestar:v1.17.0
-  doppelgangerDetection: "true"
-  graffiti: ""
-  httpUrl: ""
-externalNimbus:
-  additionalVcFlags: ""
-  containerTag: statusim/nimbus-validator-client:multiarch-v24.2.2
-  doppelgangerDetection: "true"
-  graffiti: ""
-  httpUrl: ""
-externalPrysm:
-  additionalVcFlags: ""
-  containerTag: prysmaticlabs/prysm-validator:HEAD-e26cde-debug
-  doppelgangerDetection: "true"
-  graffiti: Avado RP
-  httpUrl: ${BCHTTPURL}
-  jsonRpcUrl: ${BCJSONRPCURL}
-externalTeku:
-  additionalVcFlags: ""
-  containerTag: consensys/teku:22.3.2
-  doppelgangerDetection: "true"
-  graffiti: ""
-  httpUrl: ${BCHTTPURL}
-fallbackNormal:
-  ccHttpUrl: ""
-  ecHttpUrl: ""
-fallbackPrysm:
-  ccHttpUrl: ""
-  ecHttpUrl: ""
-  jsonRpcUrl: ""
-geth:
-  additionalFlags: ""
-  containerTag: ethereum/client-go:v1.10.17
-  enablePbss: "true"
-  maxPeers: "50"
-grafana:
-  containerTag: grafana/grafana:8.3.2
-  port: "3100"
-lighthouse:
-  additionalBnFlags: ""
-  additionalVcFlags: ""
-  containerTag: sigp/lighthouse:v2.1.5
-  maxPeers: "80"
-  p2pQuicPort: "8001"
-lodestar:
-  additionalBnFlags: ""
-  additionalVcFlags: ""
-  containerTag: chainsafe/lodestar:v1.17.0
-  maxPeers: "50"
-mevBoost:
-  additionalFlags: ""
-  aestusEnabled: "false"
-  bloxRouteMaxProfitEnabled: "false"
-  bloxRouteRegulatedEnabled: "false"
-  containerTag: flashbots/mev-boost:v0.7.7
-  edenEnabled: "false"
-  enableRegulatedAllMev: "false"
-  enableUnregulatedAllMev: "false"
-  externalUrl: ""
-  flashbotsEnabled: "false"
-  mode: local
-  openRpcPort: closed
-  port: "18550"
-  selectionMode: profile
-  ultrasoundEnabled: "false"
-native:
-  ccHttpUrl: ${BCHTTPURL}
-  consensusClient: ${CONSENSUSCLIENT}
-  ecHttpUrl: ${ECHTTPURL}
-  validatorRestartCommand: /srv/rocketpool/restart-validator.sh
-  validatorStopCommand: /srv/rocketpool/stop-validator.sh
-nethermind:
-  additionalFlags: ""
-  additionalModules: ""
-  additionalUrls: ""
-  cache: "8192"
-  containerTag: nethermind/nethermind:1.13.0
-  fullPruneMemoryBudget: "2048"
-  fullPruningThresholdMb: "51200"
-  maxPeers: "50"
-  pruneMemSize: "8192"
-nimbus:
-  additionalBnFlags: ""
-  additionalVcFlags: ""
-  bnContainerTag: statusim/nimbus-eth2:multiarch-v24.2.2
-  containerTag: statusim/nimbus-eth2:multiarch-v22.3.0
-  maxPeers: "160"
-  pruningMode: prune
-prometheus:
-  additionalFlags: ""
-  containerTag: prom/prometheus:v2.31.1
-  openPort: closed
-  port: "9091"
-prysm:
-  additionalBnFlags: ""
-  additionalVcFlags: ""
-  bnContainerTag: prysmaticlabs/prysm-beacon-chain:HEAD-e26cde-debug
-  maxPeers: "45"
-  openRpcPort: closed
-  rpcPort: "5053"
-  vcContainerTag: prysmaticlabs/prysm-validator:HEAD-e26cde-debug
-reth:
-  additionalFlags: ""
-  cache: "12288"
-  containerTag: ghcr.io/paradigmxyz/reth:v0.2.0-beta.1
-  maxPeers: "50"
+# Smartnode native-mode settings, rendered by start-node.sh on every start.
+# Do not edit on the box: it is overwritten on each start.
+#
+# Written for Smartnode v1.24.2 (shared/services/config/*-config.go). Only the
+# sections native mode reads are present; every other setting uses the
+# daemon's built-in default. Values are strings, as the loader expects
+# (map[string]map[string]string).
+#
+# root.version must equal the binary version: the daemon replays its config
+# migrators in memory for any older version string.
 root:
-  bnMetricsPort: "9100"
-  consensusClient: nimbus
-  consensusClientMode: external
-  ecMetricsPort: "9105"
-  enableBitflyNodeMetrics: "false"
-  enableMetrics: "false"
-  enableMevBoost: "false"
-  enableODaoMetrics: "false"
-  executionClient: geth
-  executionClientMode: external
-  exporterMetricsPort: "9103"
-  externalConsensusClient: prysm
+  version: ${SN_VERSION}
   isNative: "true"
-  nodeMetricsPort: "9102"
-  reconnectDelay: 60s
-  rpDir: /srv/rocketpool/
+  rpDir: ${SN_RP_DIR}
+  executionClientMode: external
+  executionClient: ${SN_EXECUTION_CLIENT}
+  consensusClientMode: external
+  externalConsensusClient: ${SN_CONSENSUS_CLIENT}
   useFallbackClients: "false"
-  vcMetricsPort: "9101"
-  version: v1.13.5
-  watchtowerMetricsPort: "9104"
+  reconnectDelay: 60s
+  enableMetrics: "false"
+  enableODaoMetrics: "false"
+  enableBitflyNodeMetrics: "false"
+  enableMevBoost: "false"
+  enableCommitBoost: "false"
 smartnode:
-  archiveECUrl: ""
-  checkpointRetentionLimit: "200"
-  dataPath: /rocketpool/data
-  distributeThreshold: "1"
-  manualMaxFee: "0"
-  minipoolStakeGasThreshold: "150"
-  network: ${NETWORK}
-  priorityFee: "2"
   projectName: rocketpool
-  recordCheckpointInterval: "45"
-  recordsPath: /srv/rocketpool/data/records
-  rewardsTreeCustomUrl: ""
+  network: ${SN_NETWORK}
+  dataPath: ${SN_DATA_PATH}
+  # Gas (gwei). manualMaxFee 0 = use the network estimate; the backend always
+  # sends an explicit maxFee for transactions the owner confirms.
+  # priorityFee is the tip (gwei) of the daemon's own transactions. 1 gwei, the
+  # same tip the UI uses, so an automatic transaction doesn't sit in the mempool
+  # and hold up the owner's transactions behind its nonce.
+  manualMaxFee: "0"
+  priorityFee: "1"
+  # "Automatic TX Gas Threshold": the daemon's own transactions (stake,
+  # auto-distribute, set-latest-delegate, express tickets, ...) wait until the
+  # estimated max fee is below this. The daemon default is 150.
+  minipoolStakeGasThreshold: "20"
+  # Auto-distribute a minipool once its EL balance exceeds this (ETH).
+  distributeThreshold: "1"
   rewardsTreeMode: download
-  useRollingRecords: "false"
-  watchtowerMaxFeeOverride: "200"
-  watchtowerPrioFeeOverride: "3"
-teku:
-  additionalBnFlags: ""
-  additionalVcFlags: ""
-  archiveMode: "false"
-  containerTag: consensys/teku:22.3.2
-  jvmHeapSize: "0"
-  maxPeers: "74"
+  verifyProposals: "false"
+native:
+  ecHttpUrl: ${SN_EC_HTTP_URL}
+  ccHttpUrl: ${SN_CC_HTTP_URL}
+  consensusClient: ${SN_CONSENSUS_CLIENT}
+  validatorRestartCommand: ${SN_RP_DIR}/signal-reconcile.sh
+  validatorStopCommand: ${SN_RP_DIR}/signal-reconcile.sh
+api:
+  # HTTP API on 127.0.0.1 only; the token is in <dataPath>/api-tokens.json.
+  apiPort: "${SN_API_PORT}"
+  openApiPort: localhost
+  tokenScope: all
+  rateLimit: "0"

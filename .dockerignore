@@ -1,0 +1,13 @@
+# Build context is the repository root; send only what build/Dockerfile uses.
+*
+!dappnode_package.json
+!build/
+build/tests
+**/node_modules
+**/dist
+# Local test output. build/backend/test stays in the context because the
+# backend stage runs the suite, but only /out (package.json, dist,
+# node_modules) is copied into the runtime image.
+**/.test-build
+**/*.log
+**/.DS_Store
