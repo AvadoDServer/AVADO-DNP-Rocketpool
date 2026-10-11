@@ -787,7 +787,7 @@ test("adopt: the later checks start the daemon when it is down, and leave it alo
     const methods = () => calls.map((c) => c.split(" ")[0]);
     assert.deepEqual(methods(), ["supervisor.stopProcess", "supervisor.startProcess"]);
 
-    for (const down of ["STOPPED", "EXITED", "FATAL"]) {
+    for (const down of ["STOPPED", "FATAL"]) {
       // +45 s tick: the start of the restart got lost, the daemon is down
       calls.length = 0;
       logs.length = 0;
@@ -803,7 +803,7 @@ test("adopt: the later checks start the daemon when it is down, and leave it alo
       ]);
     }
 
-    for (const up of ["RUNNING", "STARTING"]) {
+    for (const up of ["RUNNING", "STARTING", "EXITED"]) {
       calls.length = 0;
       logs.length = 0;
       state = up;

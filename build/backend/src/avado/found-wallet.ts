@@ -411,8 +411,12 @@ function plainReason(err: unknown): string {
   }
 }
 
-/** Supervisord states in which the daemon is down and nothing will start it again. */
-const DAEMON_DOWN_STATES = new Set(["STOPPED", "EXITED", "FATAL"]);
+/**
+ * Supervisord states in which the daemon is down and nothing will start it again.
+ * EXITED is left out on purpose: start-node.sh exits 78 when it refuses to start
+ * (unsupported config, failed backup), and restarting that would only repeat the refusal.
+ */
+const DAEMON_DOWN_STATES = new Set(["STOPPED", "FATAL"]);
 
 /**
  * Runs ADOPT_TRIGGER_RETRY_MS after adopting: if the daemon is down (the restart's start
