@@ -363,6 +363,49 @@ PATH="$SB/shim:$PATH" PACKAGE_VERSION=1.0.0 lib 'backup_if_needed' && fail "back
 assert_no_file "$VERSION_MARKER"
 assert_eq "$(cat "$DATA_DIR/wallet")" '{"crypto":"fixture-wallet"}'
 
+########## Found wallets (no wallet in the data dir)
+
+t "found wallets: one line per wallet file elsewhere on the volume, never its contents"
+new_sandbox found
+rm -f "$DATA_DIR/wallet"
+mkdir -p "$BACKUP_ROOT/legacy-20261006T200006Z" "$SB/old/.rocketpool/data" "$SB/a/b/c/d/e/f"
+printf '{"crypto":"backup-wallet"}' >"$BACKUP_ROOT/legacy-20261006T200006Z/wallet"
+printf '{"crypto":"old-wallet"}' >"$SB/old/.rocketpool/data/wallet"
+printf '{"crypto":"too-deep"}' >"$SB/a/b/c/d/e/f/wallet"
+lib 'log_found_wallets' >"$SB/found.log" && ok || fail "returned failure"
+assert_contains "$SB/found.log" "[start-node] No wallet in $DATA_DIR. A wallet file exists at $BACKUP_ROOT/legacy-20261006T200006Z/wallet (the app offers to use it)."
+assert_contains "$SB/found.log" "[start-node] No wallet in $DATA_DIR. A wallet file exists at $SB/old/.rocketpool/data/wallet (the app offers to use it)."
+assert_eq "$(wc -l <"$SB/found.log" | tr -d ' ')" "2" "(depth 7 is not searched)"
+assert_not_contains "$SB/found.log" "crypto"
+assert_not_contains "$SB/found.log" "none found"
+
+t "found wallets: none anywhere"
+new_sandbox foundnone
+rm -f "$DATA_DIR/wallet"
+lib 'log_found_wallets' >"$SB/found.log" && ok || fail "returned failure"
+assert_eq "$(cat "$SB/found.log")" "[start-node] No wallet in $DATA_DIR and none found elsewhere on the volume (new install, or restore with the recovery phrase)."
+
+t "found wallets: the data dir's own wallet is never reported"
+new_sandbox foundself
+lib 'log_found_wallets' >"$SB/found.log"
+assert_not_contains "$SB/found.log" "$DATA_DIR/wallet"
+assert_contains "$SB/found.log" "none found elsewhere"
+
+t "start: with no wallet in the data dir, the log says where one is; with one, nothing is said"
+new_sandbox startfound
+rm -f "$DATA_DIR/wallet"
+mkdir -p "$SB/old"
+printf '{"crypto":"old-wallet"}' >"$SB/old/wallet"
+rc="$(run_start)"
+assert_eq "$rc" "0"
+assert_contains "$SB/out.log" "A wallet file exists at $SB/old/wallet (the app offers to use it)."
+assert_not_contains "$SB/out.log" "old-wallet"
+assert_no_file "$DATA_DIR/wallet"
+new_sandbox startnofound
+rc="$(run_start)"
+assert_eq "$rc" "0"
+assert_not_contains "$SB/out.log" "No wallet in"
+
 ########## start-node.sh end to end (stub daemon)
 
 t "start: happy path backs up, renders, preflights, execs the daemon"

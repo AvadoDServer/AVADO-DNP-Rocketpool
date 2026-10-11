@@ -372,3 +372,21 @@ backup_if_needed() {
     printf '%s\n' "$fp" >"${FINGERPRINT_FILE}.tmp" && mv -f "${FINGERPRINT_FILE}.tmp" "$FINGERPRINT_FILE" || return 1
     return 0
 }
+
+# Logs where wallet files are on the package volume (the parent of DATA_DIR)
+# while DATA_DIR has none, e.g. a wallet left in an automatic backup or in an
+# old layout after an upgrade. The app offers to use one of them. Only paths
+# are printed, never file contents.
+log_found_wallets() {
+    local root path found=0
+    root="$(dirname "$DATA_DIR")"
+    while IFS= read -r -d '' path; do
+        [ "$path" = "$DATA_DIR/wallet" ] && continue
+        log "No wallet in $DATA_DIR. A wallet file exists at $path (the app offers to use it)."
+        found=1
+    done < <(find "$root" -maxdepth 6 -type f -name wallet -print0 2>/dev/null)
+    if [ "$found" -eq 0 ]; then
+        log "No wallet in $DATA_DIR and none found elsewhere on the volume (new install, or restore with the recovery phrase)."
+    fi
+    return 0
+}
