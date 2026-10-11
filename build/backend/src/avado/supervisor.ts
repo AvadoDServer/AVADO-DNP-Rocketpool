@@ -19,18 +19,30 @@ function member(xml: string, name: string): string | undefined {
   return re.exec(xml)?.[1];
 }
 
+type RpcParam = string | boolean;
+
+function rpcValue(p: RpcParam): string {
+  return typeof p === "boolean" ? `<boolean>${p ? 1 : 0}</boolean>` : `<string>${xmlEscape(p)}</string>`;
+}
+
+/** Outcome of one XML-RPC call: the response XML, or why there is none (fault string or transport error). */
+type RpcResult = { ok: true; xml: string } | { ok: false; fault?: string; error: string };
+
 /**
- * Asks supervisord (XML-RPC over its unix socket) for a program's state.
- * No shell is involved; the program name comes from configuration, never from a request.
+ * One XML-RPC call to supervisord over its unix socket. No shell is involved; method
+ * names and the program name come from code and configuration, never from a request.
  */
-export function getProcessState(socketPath: string, program: string, timeoutMs = 2000): Promise<ProcessState> {
+function rpc(socketPath: string, methodName: string, params: RpcParam[], timeoutMs: number): Promise<RpcResult> {
   const body =
-    `<?xml version="1.0"?><methodCall><methodName>supervisor.getProcessInfo</methodName>` +
-    `<params><param><value><string>${xmlEscape(program)}</string></value></param></params></methodCall>`;
+    `<?xml version="1.0"?><methodCall><methodName>${methodName}</methodName><params>` +
+    params.map((p) => `<param><value>${rpcValue(p)}</value></param>`).join("") +
+    `</params></methodCall>`;
   return new Promise((resolve) => {
     const req = http.request(
       {
         socketPath,
+        // one connection per call: a pooled keep-alive socket can outlive a supervisord restart
+        agent: false,
         path: "/RPC2",
         method: "POST",
         headers: { "Content-Type": "text/xml", "Content-Length": Buffer.byteLength(body) },
@@ -44,23 +56,48 @@ export function getProcessState(socketPath: string, program: string, timeoutMs =
         });
         res.on("end", () => {
           if (xml.includes("<fault>")) {
-            return resolve({ state: "UNKNOWN", error: member(xml, "faultString") ?? "supervisord fault" });
+            const fault = member(xml, "faultString") ?? "supervisord fault";
+            return resolve({ ok: false, fault, error: fault });
           }
-          const state = member(xml, "statename");
-          if (!state) return resolve({ state: "UNKNOWN", error: "Unexpected supervisord response" });
-          const start = Number(member(xml, "start"));
-          const exit = Number(member(xml, "exitstatus"));
-          resolve({
-            state,
-            description: member(xml, "description"),
-            since: state === "RUNNING" && start > 0 ? new Date(start * 1000).toISOString() : undefined,
-            exitStatus: Number.isFinite(exit) && state !== "RUNNING" ? exit : undefined,
-          });
+          resolve({ ok: true, xml });
         });
       },
     );
     req.on("timeout", () => req.destroy(new Error("timeout")));
-    req.on("error", (err) => resolve({ state: "UNKNOWN", error: `supervisord not reachable: ${err.message}` }));
+    req.on("error", (err) => resolve({ ok: false, error: `supervisord not reachable: ${err.message}` }));
     req.end(body);
   });
+}
+
+/** Asks supervisord for a program's state. */
+export async function getProcessState(socketPath: string, program: string, timeoutMs = 2000): Promise<ProcessState> {
+  const r = await rpc(socketPath, "supervisor.getProcessInfo", [program], timeoutMs);
+  if (!r.ok) return { state: "UNKNOWN", error: r.error };
+  const xml = r.xml;
+  const state = member(xml, "statename");
+  if (!state) return { state: "UNKNOWN", error: "Unexpected supervisord response" };
+  const start = Number(member(xml, "start"));
+  const exit = Number(member(xml, "exitstatus"));
+  return {
+    state,
+    description: member(xml, "description"),
+    since: state === "RUNNING" && start > 0 ? new Date(start * 1000).toISOString() : undefined,
+    exitStatus: Number.isFinite(exit) && state !== "RUNNING" ? exit : undefined,
+  };
+}
+
+/**
+ * Restarts a supervisord program: stopProcess (waiting; NOT_RUNNING is fine), then
+ * startProcess (waiting). `timeoutMs` applies to each of the two calls. Never throws.
+ */
+export async function restartProcess(
+  socketPath: string,
+  program: string,
+  timeoutMs = 20000,
+): Promise<{ ok: boolean; error?: string }> {
+  const stop = await rpc(socketPath, "supervisor.stopProcess", [program, true], timeoutMs);
+  if (!stop.ok && !stop.fault?.includes("NOT_RUNNING")) return { ok: false, error: `stopping ${program}: ${stop.error}` };
+  const start = await rpc(socketPath, "supervisor.startProcess", [program, true], timeoutMs);
+  if (!start.ok) return { ok: false, error: `starting ${program}: ${start.error}` };
+  return { ok: true };
 }

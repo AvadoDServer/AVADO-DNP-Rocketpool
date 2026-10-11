@@ -43,7 +43,7 @@ export async function getReconcileStatus(config: Config): Promise<ReconcileStatu
 }
 
 /** Asks the loop to run now by touching the trigger file. */
-export async function requestReconcileRun(config: Config): Promise<void> {
+export async function requestReconcileRun(config: Pick<Config, "reconcileTriggerFile">): Promise<void> {
   await writeFile(config.reconcileTriggerFile, new Date().toISOString() + "\n", { mode: 0o644 });
 }
 

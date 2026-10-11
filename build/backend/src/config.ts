@@ -13,6 +13,8 @@ export interface Config {
   dataDir: string;
   /** Where package and wallet-change backups live (same volume as dataDir). */
   backupDir: string;
+  /** The package volume (production: /rocketpool), searched for a wallet left outside dataDir. */
+  volumeRoot: string;
   /** Status file written by the reconcile loop (Task 3). */
   reconcileStatusFile: string;
   /** File whose presence asks the reconcile loop to run now. */
@@ -63,6 +65,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     snApi: (env.SN_API || "http://127.0.0.1:8280").replace(/\/+$/, ""),
     dataDir,
     backupDir: env.BACKUP_DIR || path.join(path.dirname(dataDir), "backups"),
+    volumeRoot: env.VOLUME_ROOT || path.dirname(dataDir),
     reconcileStatusFile: env.RECONCILE_STATUS_FILE || "/tmp/reconcile-status.json",
     reconcileTriggerFile: env.RECONCILE_TRIGGER_FILE || "/tmp/reconcile-now",
     daemonLogFile: env.DAEMON_LOG_FILE || "/var/log/rocketpool/daemon.log",

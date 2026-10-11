@@ -1,6 +1,7 @@
 import type { IncomingMessage, RequestListener, ServerResponse } from "node:http";
 import { BACKUP_DOWNLOAD_LIMIT, createDownloadState, handleBackupDownload } from "./avado/backup-download";
 import { cleanLine, parseTail, tailFile } from "./avado/logs";
+import { adoptFoundWallet } from "./avado/found-wallet";
 import { getAvadoStatus } from "./avado/status";
 import { archiveLegacyMnemonic } from "./backup";
 import type { Config } from "./config";
@@ -86,6 +87,35 @@ export function createApp(config: Config, logger: Logger): RequestListener {
         const r = await archiveLegacyMnemonic({ dataDir: config.dataDir, backupDir: config.backupDir }, body);
         logger.info(`legacy mnemonic archived to ${r.name}`);
         sendJson(res, 200, { status: "success", error: "", archived: true, name: r.name });
+      } catch (e) {
+        if (e instanceof HttpError) return sendError(res, e.statusCode, e.message);
+        throw e;
+      }
+    }),
+    "/api/avado/wallet/adopt": method("POST", async (req, res) => {
+      const type = (req.headers["content-type"] || "").split(";")[0]!.trim().toLowerCase();
+      if (type !== "application/json") return sendError(res, 415, "Use application/json");
+      let body: unknown;
+      try {
+        body = JSON.parse((await readBody(req)).toString("utf8"));
+      } catch (e) {
+        if (e instanceof HttpError) return sendError(res, e.statusCode, e.message);
+        return sendError(res, 400, "Invalid JSON body");
+      }
+      try {
+        const r = await adoptFoundWallet(
+          {
+            volumeRoot: config.volumeRoot,
+            dataDir: config.dataDir,
+            supervisorSocket: config.supervisorSocket,
+            daemonProgram: config.daemonProgram,
+            reconcileTriggerFile: config.reconcileTriggerFile,
+          },
+          body,
+        );
+        logger.info(`wallet adopted from ${r.dir || "."}: ${r.copied.join(",")}`);
+        if (!r.restarted) logger.warn(`wallet adopted, but restarting the daemon failed: ${r.restartError ?? "unknown"}`);
+        sendJson(res, 200, { status: "success", error: "", ...r });
       } catch (e) {
         if (e instanceof HttpError) return sendError(res, e.statusCode, e.message);
         throw e;
