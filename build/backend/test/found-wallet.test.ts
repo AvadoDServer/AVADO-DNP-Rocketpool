@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { after, afterEach, before, beforeEach, test } from "node:test";
-import { adoptFoundWallet, findWallets, FOUND_WALLET_MAX_ENTRIES } from "../src/avado/found-wallet";
+import {
+  ADOPT_BUSY,
+  ADOPT_TRIGGER_RETRY_MS,
+  adoptFoundWallet,
+  clearFoundWalletsCache,
+  findWallets,
+  findWalletsCached,
+  FOUND_WALLET_MAX_ENTRIES,
+} from "../src/avado/found-wallet";
 import { restartProcess } from "../src/avado/supervisor";
 import { HttpError } from "../src/http-util";
 import { startHarness, type Harness } from "./helpers";
@@ -20,6 +29,7 @@ const WALLET = JSON.stringify({
   nextAccount: 1,
 });
 const ADDRESS = "0xAbCdEf0123456789abcdef0123456789ABCDEF01";
+const asRoot = process.getuid?.() === 0;
 const exists = (p: string) => lstat(p).then(() => true, () => false);
 
 /** A wallet directory: wallet + password (+ address, validators/, custom-keys/), wallet mtime set. */
@@ -73,6 +83,7 @@ beforeEach(async () => {
     supervisorSocket: path.join(root, "no-such-supervisor.sock"),
     daemonProgram: "rocketpool-node",
     reconcileTriggerFile: path.join(root, "reconcile-now"),
+    schedule: () => undefined,
   };
 });
 afterEach(async () => {
@@ -407,16 +418,219 @@ test("adopt: symlinks inside the source are not copied", async () => {
   assert.equal(await exists(path.join(dataDir, "transactions.json")), false);
 });
 
+test("adopt: symlinks are skipped at the top of validators/ and for folders inside it", async () => {
+  const src = path.join(vol, "backups", "legacy-x");
+  await makeWallet(src);
+  await mkdir(path.join(root, "outside-keys", "keys"), { recursive: true });
+  await writeFile(path.join(root, "outside-keys", "keys", "0xcc.json"), "outside");
+  await symlink(path.join(root, "outside-keys"), path.join(src, "validators"));
+  const r1 = await adoptFoundWallet(opts, { dir: "backups/legacy-x" });
+  assert.deepEqual(r1.copied, ["wallet", "password", "address"]);
+  assert.equal(await exists(path.join(dataDir, "validators")), false);
+
+  await rm(dataDir, { recursive: true });
+  await mkdir(dataDir);
+  await rm(path.join(src, "validators"));
+  await mkdir(path.join(src, "validators", "teku"), { recursive: true });
+  await writeFile(path.join(src, "validators", "teku", "0xaa.json"), "{}");
+  await symlink(path.join(root, "outside-keys"), path.join(src, "validators", "lighthouse"));
+  const r2 = await adoptFoundWallet(opts, { dir: "backups/legacy-x" });
+  assert.deepEqual(r2.copied, ["wallet", "password", "address", "validators"]);
+  assert.deepEqual(await readdir(path.join(dataDir, "validators")), ["teku"]);
+});
+
+test("adopt: a write that fails inside a nested copy (read-only folder) removes everything created", { skip: asRoot }, async () => {
+  const src = path.join(vol, "backups", "legacy-x");
+  await makeWallet(src, { validators: true });
+  const srcBefore = await treeSum(src);
+  await mkdir(path.join(dataDir, "validators", "teku", "keys"), { recursive: true });
+  await chmod(path.join(dataDir, "validators", "teku", "keys"), 0o500);
+  const dataBefore = await treeSum(dataDir);
+  try {
+    await assert.rejects(
+      () => adoptFoundWallet(opts, { dir: "backups/legacy-x" }),
+      (e: unknown) =>
+        e instanceof HttpError &&
+        e.statusCode === 500 &&
+        e.message === "Putting the wallet back failed: the data folder cannot be written to. Nothing was changed.",
+    );
+    assert.deepEqual(await treeSum(dataDir), dataBefore);
+    assert.deepEqual(await treeSum(src), srcBefore);
+  } finally {
+    await chmod(path.join(dataDir, "validators", "teku", "keys"), 0o755);
+  }
+});
+
+test("adopt: a folder that can't be created (read-only validators/) removes everything created", { skip: asRoot }, async () => {
+  const src = path.join(vol, "backups", "legacy-x");
+  await makeWallet(src, { validators: true });
+  await mkdir(path.join(dataDir, "validators"));
+  await chmod(path.join(dataDir, "validators"), 0o500);
+  const dataBefore = await treeSum(dataDir);
+  try {
+    await assert.rejects(
+      () => adoptFoundWallet(opts, { dir: "backups/legacy-x" }),
+      (e: unknown) => e instanceof HttpError && e.statusCode === 500 && /cannot be written to/.test(e.message),
+    );
+    assert.deepEqual(await treeSum(dataDir), dataBefore);
+  } finally {
+    await chmod(path.join(dataDir, "validators"), 0o755);
+  }
+});
+
+test("adopt: a data dir this call created is removed again on failure; an unreadable source file is named", { skip: asRoot }, async () => {
+  const src = path.join(vol, "backups", "legacy-x");
+  await makeWallet(src, { validators: true });
+  const deepData = path.join(vol, "new", "nested", "data");
+  const key = path.join(src, "validators", "teku", "keys", "0xaa.json");
+  await chmod(key, 0o000);
+  try {
+    await assert.rejects(
+      () => adoptFoundWallet({ ...opts, dataDir: deepData }, { dir: "backups/legacy-x" }),
+      (e: unknown) =>
+        e instanceof HttpError &&
+        e.statusCode === 500 &&
+        e.message ===
+          "Putting the wallet back failed: validators/teku/keys/0xaa.json in the found wallet could not be read. Nothing was changed.",
+    );
+    assert.equal(await exists(path.join(vol, "new")), false, "every folder mkdir -p made is gone");
+  } finally {
+    await chmod(key, 0o644);
+  }
+});
+
+test("adopt: when the cleanup itself fails, the message says so", { skip: asRoot }, async () => {
+  const src = path.join(vol, "backups", "legacy-x");
+  await makeWallet(src);
+  let first = true;
+  try {
+    await assert.rejects(
+      () =>
+        adoptFoundWallet(
+          {
+            ...opts,
+            // after the wallet is copied, the data dir turns read-only: the password copy
+            // fails, and so does removing the wallet again
+            onCreated: async () => {
+              if (first) await chmod(dataDir, 0o500);
+              first = false;
+            },
+          },
+          { dir: "backups/legacy-x" },
+        ),
+      (e: unknown) =>
+        e instanceof HttpError &&
+        e.statusCode === 500 &&
+        e.message === "Putting the wallet back failed: the data folder cannot be written to. Some copied files could not be removed again.",
+    );
+  } finally {
+    await chmod(dataDir, 0o755);
+  }
+  assert.ok(await exists(path.join(dataDir, "wallet")), "the leftover the message talks about");
+});
+
+test("adopt: a FIFO named like a wallet file is never opened in a blocking way", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const src = path.join(vol, "backups", "legacy-x");
+  await makeWallet(src);
+  execFileSync("mkfifo", [path.join(src, "transactions.json")]);
+  const r = await adoptFoundWallet(opts, { dir: "backups/legacy-x" });
+  assert.deepEqual(r.copied, ["wallet", "password", "address"]);
+  // and a FIFO as the wallet itself is not a candidate
+  await makeWallet(path.join(vol, "fifo"));
+  await rm(path.join(vol, "fifo", "wallet"));
+  execFileSync("mkfifo", [path.join(vol, "fifo", "wallet")]);
+  assert.deepEqual(
+    (await findWallets({ volumeRoot: vol, dataDir })).map((f) => f.dir),
+    ["backups/legacy-x"],
+  );
+});
+
+test("adopt: a second adopt while one is running is refused (409), the first one finishes", async () => {
+  const sock = path.join(root, "s.sock");
+  let release!: () => void;
+  const released = new Promise<void>((r) => (release = r));
+  const { server, calls } = await fakeSupervisor(sock, () => OK, async (m) => {
+    if (m === "supervisor.stopProcess") await released;
+  });
+  try {
+    await makeWallet(path.join(vol, "backups", "legacy-x"));
+    const first = adoptFoundWallet({ ...opts, supervisorSocket: sock }, { dir: "backups/legacy-x" });
+    while (calls.length === 0) await new Promise((r) => setTimeout(r, 10));
+    await assert.rejects(
+      () => adoptFoundWallet({ ...opts, supervisorSocket: sock }, { dir: "backups/legacy-x" }),
+      (e: unknown) => e instanceof HttpError && e.statusCode === 409 && e.message === ADOPT_BUSY,
+    );
+    release();
+    assert.equal((await first).restarted, true);
+    // not busy any more: now refused because the wallet is in place
+    await assert.rejects(
+      () => adoptFoundWallet({ ...opts, supervisorSocket: sock }, { dir: "backups/legacy-x" }),
+      (e: unknown) => e instanceof HttpError && e.statusCode === 409 && e.message !== ADOPT_BUSY,
+    );
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
+});
+
+test("findWallets: backups/ is searched first, so a big tree elsewhere can't use up the entry limit", async () => {
+  const big = path.join(vol, "aaa");
+  await mkdir(big, { recursive: true });
+  for (let i = 0; i < FOUND_WALLET_MAX_ENTRIES; i++) await writeFile(path.join(big, `f${i}`), "");
+  await makeWallet(path.join(vol, "backups", "legacy-x"));
+  assert.deepEqual(
+    (await findWallets({ volumeRoot: vol, dataDir })).map((f) => f.dir),
+    ["backups/legacy-x"],
+  );
+});
+
+test("findWallets: unusable newer wallet files don't push out 10 usable older ones", async () => {
+  for (let i = 0; i < 3; i++) {
+    const d = path.join(vol, "broken", `b${i}`);
+    await makeWallet(d);
+    await writeFile(path.join(d, "wallet"), "{}");
+    await utimes(path.join(d, "wallet"), new Date("2026-12-01T00:00:00Z"), new Date("2026-12-01T00:00:00Z"));
+  }
+  for (let i = 0; i < 11; i++) {
+    await makeWallet(path.join(vol, "backups", `g${String(i).padStart(2, "0")}`), { mtime: new Date(Date.UTC(2026, 0, 1 + i)) });
+  }
+  const found = await findWallets({ volumeRoot: vol, dataDir });
+  assert.deepEqual(
+    found.map((f) => f.dir),
+    Array.from({ length: 10 }, (_, i) => `backups/g${String(10 - i).padStart(2, "0")}`),
+  );
+});
+
+test("findWalletsCached: reuses a scan for a short while; cleared on demand", async () => {
+  clearFoundWalletsCache();
+  await makeWallet(path.join(vol, "backups", "legacy-x"));
+  const [a, b] = await Promise.all([findWalletsCached({ volumeRoot: vol, dataDir }), findWalletsCached({ volumeRoot: vol, dataDir })]);
+  assert.equal(a, b, "one scan in flight for concurrent polls");
+  await makeWallet(path.join(vol, "backups", "legacy-y"));
+  assert.equal((await findWalletsCached({ volumeRoot: vol, dataDir })).length, 1, "cached");
+  clearFoundWalletsCache();
+  assert.equal((await findWalletsCached({ volumeRoot: vol, dataDir })).length, 2);
+  clearFoundWalletsCache();
+});
+
 // ---------- supervisor restartProcess ----------
 
-function fakeSupervisor(socketPath: string, reply: (method: string) => string): Promise<{ server: http.Server; calls: string[] }> {
+function fakeSupervisor(
+  socketPath: string,
+  reply: (method: string) => string,
+  before?: (method: string) => Promise<void>,
+  onCall?: (method: string) => void,
+): Promise<{ server: http.Server; calls: string[] }> {
   const calls: string[] = [];
   const server = http.createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
-    req.on("end", () => {
+    req.on("end", async () => {
       const m = /<methodName>([^<]+)<\/methodName>/.exec(body)?.[1] ?? "";
       calls.push(`${m} ${/<string>([^<]*)<\/string>/.exec(body)?.[1]} ${/<boolean>([01])<\/boolean>/.exec(body)?.[1]}`);
+      onCall?.(m);
+      await before?.(m);
+      if (res.destroyed) return;
       res.writeHead(200, { "Content-Type": "text/xml" });
       res.end(reply(m));
     });
@@ -426,49 +640,131 @@ function fakeSupervisor(socketPath: string, reply: (method: string) => string): 
 const OK = `<?xml version="1.0"?><methodResponse><params><param><value><boolean>1</boolean></value></param></params></methodResponse>`;
 const fault = (s: string) =>
   `<?xml version="1.0"?><methodResponse><fault><value><struct><member><name>faultCode</name><value><int>70</int></value></member><member><name>faultString</name><value><string>${s}</string></value></member></struct></value></fault></methodResponse>`;
+const closeServer = (server: http.Server) =>
+  new Promise((r) => {
+    server.closeAllConnections();
+    server.close(r);
+  });
 
-test("restartProcess: stop then start; NOT_RUNNING on stop is fine", async () => {
+test("restartProcess: stop (waiting) then start (not waiting); NOT_RUNNING on stop is fine", async () => {
   const sock = path.join(root, "s.sock");
   for (const stopReply of [OK, fault("NOT_RUNNING")]) {
     const { server, calls } = await fakeSupervisor(sock, (m) => (m === "supervisor.stopProcess" ? stopReply : OK));
     try {
       assert.deepEqual(await restartProcess(sock, "rocketpool-node"), { ok: true });
-      assert.deepEqual(calls, ["supervisor.stopProcess rocketpool-node 1", "supervisor.startProcess rocketpool-node 1"]);
+      assert.deepEqual(calls, ["supervisor.stopProcess rocketpool-node 1", "supervisor.startProcess rocketpool-node 0"]);
     } finally {
-      await new Promise((r) => server.close(r));
+      await closeServer(server);
     }
   }
 });
 
-test("restartProcess: any other fault, or no supervisord, is ok:false with an error", async () => {
+test("restartProcess: a stop that never answers still sends the start, within the deadline", async () => {
   const sock = path.join(root, "s.sock");
-  const { server } = await fakeSupervisor(sock, (m) => (m === "supervisor.startProcess" ? fault("SPAWN_ERROR: rocketpool-node") : OK));
+  const { server, calls } = await fakeSupervisor(
+    sock,
+    () => OK,
+    (m) => (m === "supervisor.stopProcess" ? new Promise<void>(() => undefined) : Promise.resolve()),
+  );
   try {
-    const r = await restartProcess(sock, "rocketpool-node");
-    assert.equal(r.ok, false);
-    assert.match(r.error ?? "", /SPAWN_ERROR/);
+    const t0 = Date.now();
+    assert.deepEqual(await restartProcess(sock, "rocketpool-node", 300), { ok: true });
+    assert.ok(Date.now() - t0 < 2000, "the stop deadline is wall-clock");
+    assert.deepEqual(calls, ["supervisor.stopProcess rocketpool-node 1", "supervisor.startProcess rocketpool-node 0"]);
   } finally {
-    await new Promise((r) => server.close(r));
+    await closeServer(server);
+  }
+});
+
+test("restartProcess: a stop fault still sends the start; ALREADY_STARTED on start is fine", async () => {
+  const sock = path.join(root, "s.sock");
+  const { server, calls } = await fakeSupervisor(sock, (m) =>
+    m === "supervisor.stopProcess" ? fault("FAILED: rocketpool-node") : fault("ALREADY_STARTED: rocketpool-node"),
+  );
+  try {
+    assert.deepEqual(await restartProcess(sock, "rocketpool-node"), { ok: true });
+    assert.equal(calls.length, 2);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("restartProcess: a failing start, a non-XML-RPC answer, or no supervisord is ok:false with an error", async () => {
+  const sock = path.join(root, "s.sock");
+  for (const [startReply, re] of [
+    [fault("SPAWN_ERROR: rocketpool-node"), /SPAWN_ERROR/],
+    ["<html>not xml-rpc</html>", /Unexpected supervisord response/],
+  ] as const) {
+    const { server } = await fakeSupervisor(sock, (m) => (m === "supervisor.startProcess" ? startReply : OK));
+    try {
+      const r = await restartProcess(sock, "rocketpool-node");
+      assert.equal(r.ok, false);
+      assert.match(r.error ?? "", re);
+    } finally {
+      await closeServer(server);
+    }
   }
   const gone = await restartProcess(path.join(root, "nope.sock"), "rocketpool-node");
   assert.equal(gone.ok, false);
   assert.match(gone.error ?? "", /supervisord not reachable/);
 });
 
-test("adopt: restarts the daemon through supervisord when it is there", async () => {
+test("restartProcess: an HTTP error status is not success", async () => {
   const sock = path.join(root, "s.sock");
-  const { server, calls } = await fakeSupervisor(sock, () => OK);
+  const server = http.createServer((_req, res) => {
+    res.writeHead(500);
+    res.end(OK);
+  });
+  await new Promise<void>((r) => server.listen(sock, () => r()));
+  try {
+    const r = await restartProcess(sock, "rocketpool-node");
+    assert.equal(r.ok, false);
+    assert.match(r.error ?? "", /HTTP 500/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("adopt: restarts the daemon, then asks for the key check, and again later", async () => {
+  const sock = path.join(root, "s.sock");
+  let triggerAtStart: boolean | undefined;
+  const { server, calls } = await fakeSupervisor(
+    sock,
+    () => OK,
+    undefined,
+    (m) => {
+      if (m === "supervisor.startProcess") triggerAtStart = existsSync(opts.reconcileTriggerFile);
+    },
+  );
+  const scheduled: { fn: () => void; ms: number }[] = [];
   try {
     await makeWallet(path.join(vol, "backups", "legacy-x"));
-    const r = await adoptFoundWallet({ ...opts, supervisorSocket: sock }, { dir: "backups/legacy-x" });
+    const r = await adoptFoundWallet(
+      { ...opts, supervisorSocket: sock, schedule: (fn, ms) => scheduled.push({ fn, ms }) },
+      { dir: "backups/legacy-x" },
+    );
     assert.equal(r.restarted, true);
     assert.equal(r.restartError, undefined);
     assert.deepEqual(
       calls.map((c) => c.split(" ")[0]),
       ["supervisor.stopProcess", "supervisor.startProcess"],
     );
+    assert.equal(triggerAtStart, false, "the trigger is written after the restart calls");
+    assert.ok(await exists(opts.reconcileTriggerFile));
+    assert.deepEqual(
+      scheduled.map((s) => s.ms),
+      [...ADOPT_TRIGGER_RETRY_MS],
+    );
+    assert.deepEqual([...ADOPT_TRIGGER_RETRY_MS], [45_000, 120_000]);
+    // the loop picks the file up (deletes it); each later timer writes it again
+    for (const s of scheduled) {
+      await rm(opts.reconcileTriggerFile);
+      s.fn();
+      for (let i = 0; i < 50 && !(await exists(opts.reconcileTriggerFile)); i++) await new Promise((r) => setTimeout(r, 10));
+      assert.ok(await exists(opts.reconcileTriggerFile), `rewritten after ${s.ms} ms`);
+    }
   } finally {
-    await new Promise((r) => server.close(r));
+    await closeServer(server);
   }
 });
 
@@ -504,6 +800,19 @@ test("status: foundWallets lists candidates while the data dir has no wallet, []
   assert.equal(s2.json.walletFilePresent, true);
   assert.deepEqual(s2.json.foundWallets, []);
   await rm(path.join(h.config.dataDir, "wallet"));
+});
+
+test("status: something that is not a wallet file at data/wallet means nothing is offered (adopt would refuse)", async () => {
+  for (const make of [
+    () => symlink(path.join(hVol, "nowhere"), path.join(h.config.dataDir, "wallet")),
+    () => mkdir(path.join(h.config.dataDir, "wallet")),
+  ]) {
+    await make();
+    const s = await h.request("GET", "/api/avado/status");
+    assert.equal(s.json.walletFilePresent, false);
+    assert.deepEqual(s.json.foundWallets, []);
+    await rm(path.join(h.config.dataDir, "wallet"), { recursive: true });
+  }
 });
 
 test("wallet/adopt: CSRF applies; GET is refused; a bad body is 400/415", async () => {

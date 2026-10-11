@@ -31,13 +31,22 @@ type RpcResult = { ok: true; xml: string } | { ok: false; fault?: string; error:
 /**
  * One XML-RPC call to supervisord over its unix socket. No shell is involved; method
  * names and the program name come from code and configuration, never from a request.
+ * `deadlineMs` is wall-clock time for the whole call: the request is destroyed when it
+ * runs out. Always settles, exactly once.
  */
-function rpc(socketPath: string, methodName: string, params: RpcParam[], timeoutMs: number): Promise<RpcResult> {
+function rpc(socketPath: string, methodName: string, params: RpcParam[], deadlineMs: number): Promise<RpcResult> {
   const body =
     `<?xml version="1.0"?><methodCall><methodName>${methodName}</methodName><params>` +
     params.map((p) => `<param><value>${rpcValue(p)}</value></param>`).join("") +
     `</params></methodCall>`;
   return new Promise((resolve) => {
+    let settled = false;
+    const settle = (r: RpcResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(r);
+    };
     const req = http.request(
       {
         socketPath,
@@ -46,7 +55,6 @@ function rpc(socketPath: string, methodName: string, params: RpcParam[], timeout
         path: "/RPC2",
         method: "POST",
         headers: { "Content-Type": "text/xml", "Content-Length": Buffer.byteLength(body) },
-        timeout: timeoutMs,
       },
       (res) => {
         let xml = "";
@@ -55,16 +63,24 @@ function rpc(socketPath: string, methodName: string, params: RpcParam[], timeout
           if (xml.length < 64 * 1024) xml += c;
         });
         res.on("end", () => {
+          if (res.statusCode !== 200) return settle({ ok: false, error: `supervisord answered HTTP ${res.statusCode}` });
+          if (!xml.includes("<methodResponse>")) return settle({ ok: false, error: "Unexpected supervisord response" });
           if (xml.includes("<fault>")) {
             const fault = member(xml, "faultString") ?? "supervisord fault";
-            return resolve({ ok: false, fault, error: fault });
+            return settle({ ok: false, fault, error: fault });
           }
-          resolve({ ok: true, xml });
+          settle({ ok: true, xml });
         });
+        res.on("error", (err) => settle({ ok: false, error: `supervisord not reachable: ${err.message}` }));
+        res.on("aborted", () => settle({ ok: false, error: "supervisord closed the connection" }));
+        res.on("close", () => settle({ ok: false, error: "supervisord closed the connection" }));
       },
     );
-    req.on("timeout", () => req.destroy(new Error("timeout")));
-    req.on("error", (err) => resolve({ ok: false, error: `supervisord not reachable: ${err.message}` }));
+    const timer = setTimeout(() => {
+      settle({ ok: false, error: `supervisord did not answer within ${Math.round(deadlineMs / 1000)}s` });
+      req.destroy();
+    }, deadlineMs);
+    req.on("error", (err) => settle({ ok: false, error: `supervisord not reachable: ${err.message}` }));
     req.end(body);
   });
 }
@@ -86,18 +102,26 @@ export async function getProcessState(socketPath: string, program: string, timeo
   };
 }
 
+/** How long the restart waits for the daemon to stop (supervisord.conf: stopwaitsecs=60). */
+export const RESTART_STOP_DEADLINE_MS = 70_000;
+/** startProcess is sent without waiting, so its answer is quick. */
+export const RESTART_START_TIMEOUT_MS = 5_000;
+
 /**
- * Restarts a supervisord program: stopProcess (waiting; NOT_RUNNING is fine), then
- * startProcess (waiting). `timeoutMs` applies to each of the two calls. Never throws.
+ * Restarts a supervisord program: stopProcess(program, wait=true) under a wall-clock
+ * deadline (NOT_RUNNING is fine), then startProcess(program, wait=false), which returns
+ * as soon as supervisord has accepted it. The start is sent even when the stop timed out
+ * or failed, so the program is never left stopped by this call; ALREADY_STARTED counts as
+ * success. `ok` is false only when the start itself failed. Never throws.
  */
 export async function restartProcess(
   socketPath: string,
   program: string,
-  timeoutMs = 20000,
+  stopDeadlineMs = RESTART_STOP_DEADLINE_MS,
+  startTimeoutMs = RESTART_START_TIMEOUT_MS,
 ): Promise<{ ok: boolean; error?: string }> {
-  const stop = await rpc(socketPath, "supervisor.stopProcess", [program, true], timeoutMs);
-  if (!stop.ok && !stop.fault?.includes("NOT_RUNNING")) return { ok: false, error: `stopping ${program}: ${stop.error}` };
-  const start = await rpc(socketPath, "supervisor.startProcess", [program, true], timeoutMs);
-  if (!start.ok) return { ok: false, error: `starting ${program}: ${start.error}` };
+  await rpc(socketPath, "supervisor.stopProcess", [program, true], stopDeadlineMs);
+  const start = await rpc(socketPath, "supervisor.startProcess", [program, false], startTimeoutMs);
+  if (!start.ok && !start.fault?.includes("ALREADY_STARTED")) return { ok: false, error: `starting ${program}: ${start.error}` };
   return { ok: true };
 }
