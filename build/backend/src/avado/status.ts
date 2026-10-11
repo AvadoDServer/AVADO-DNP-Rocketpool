@@ -1,9 +1,10 @@
-import { readFile, stat } from "node:fs/promises";
+import { lstat, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { listBackups, type BackupInfo } from "../backup";
 import type { Config } from "../config";
 import type { Limiter } from "../http-util";
 import { redact } from "../log";
+import { findWalletsCached, type FoundWallet } from "./found-wallet";
 import { recentErrors } from "./logs";
 import { readAutoTxSettings, type AutoTxSettings } from "./settings";
 import { getProcessState, type ProcessState } from "./supervisor";
@@ -26,6 +27,12 @@ export interface AvadoStatus {
   passwordFilePresent: boolean;
   /** The legacy plaintext recovery phrase file from the old package is still in the data dir. */
   legacyMnemonicPresent: boolean;
+  /**
+   * Wallets found elsewhere on the package volume (backups, old layouts), newest first.
+   * Only searched while nothing at all is at <dataDir>/wallet (lstat), because adopting
+   * refuses then; [] otherwise and on any scan failure.
+   */
+  foundWallets: FoundWallet[];
   /**
    * Automatic-transaction settings the daemon actually runs with, read from the
    * rendered Smartnode settings file. Omitted (not null) when that file can't be
@@ -70,6 +77,18 @@ async function safeAutoTxSettings(settingsFile: string): Promise<AutoTxSettings 
   }
 }
 
+/** findWallets already skips what it can't read; this makes sure a scan problem never fails the status call. */
+async function safeFindWallets(config: Config): Promise<FoundWallet[]> {
+  try {
+    // something that is not a regular file at data/wallet (a dangling symlink, a folder)
+    // also blocks adopting, so nothing is offered then
+    if (await lstat(path.join(config.dataDir, "wallet")).then(() => true, () => false)) return [];
+    return await findWalletsCached({ volumeRoot: config.volumeRoot, dataDir: config.dataDir });
+  } catch {
+    return [];
+  }
+}
+
 async function limitedErrors(file: string, limiter: Limiter): Promise<string[]> {
   // under load the error lines are skipped rather than queued
   if (!limiter.try()) return [];
@@ -96,6 +115,7 @@ export async function getAvadoStatus(config: Config, logLimiter: Limiter): Promi
       readSmall(path.join(d, ".avado-package-version")),
       safeAutoTxSettings(config.settingsFile),
     ]);
+  const foundWallets = wallet ? [] : await safeFindWallets(config);
   return {
     packageVersion: config.packageVersion ?? marker,
     network: config.network,
@@ -109,6 +129,7 @@ export async function getAvadoStatus(config: Config, logLimiter: Limiter): Promi
     walletFilePresent: wallet,
     passwordFilePresent: password,
     legacyMnemonicPresent: mnemonic,
+    foundWallets,
     ...(settings ? { settings } : {}),
   };
 }

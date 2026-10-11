@@ -372,3 +372,26 @@ backup_if_needed() {
     printf '%s\n' "$fp" >"${FINGERPRINT_FILE}.tmp" && mv -f "${FINGERPRINT_FILE}.tmp" "$FINGERPRINT_FILE" || return 1
     return 0
 }
+
+# Logs where wallet files are on the package volume (the parent of DATA_DIR)
+# while DATA_DIR has none, e.g. a wallet left in an automatic backup or in an
+# old layout after an upgrade. The app offers to use one of them. Skips the
+# folders the app never searches (rewards trees, node_modules, interrupted
+# backups, recovery-phrase archives). Only paths are printed, never file
+# contents; control characters in a path are printed as '?'.
+log_found_wallets() {
+    local root path safe found=0
+    root="$(dirname "$DATA_DIR")"
+    while IFS= read -r -d '' path; do
+        [ "$path" = "$DATA_DIR/wallet" ] && continue
+        safe="$(printf '%s' "$path" | LC_ALL=C tr '\001-\037\177' '?')"
+        log "No wallet in $DATA_DIR. A wallet file exists at $safe (the app offers to use it)."
+        found=1
+    done < <(find "$root" -maxdepth 6 \
+        -type d \( -name rewards-trees -o -name node_modules -o -name '.partial-*' -o -name 'mnemonic-archive-*' \) -prune \
+        -o -type f -name wallet -print0 2>/dev/null)
+    if [ "$found" -eq 0 ]; then
+        log "No wallet in $DATA_DIR and none found elsewhere on the volume (new install, or restore with the recovery phrase)."
+    fi
+    return 0
+}

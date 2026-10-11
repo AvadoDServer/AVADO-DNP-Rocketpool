@@ -71,7 +71,7 @@ async function listFiles(root: string, rel = ""): Promise<string[]> {
   return out;
 }
 
-async function sha256(file: string): Promise<string> {
+export async function sha256(file: string): Promise<string> {
   return createHash("sha256").update(await readFile(file)).digest("hex");
 }
 

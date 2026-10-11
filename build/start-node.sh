@@ -4,6 +4,7 @@
 # 1. Validate NETWORK / EXECUTIONCLIENT / CONSENSUSCLIENT and build the EL/CL URLs.
 # 2. On the first start of a new package version, back up wallet, password,
 #    validator keys and old settings to /rocketpool/backups (keep newest 3).
+#    With no wallet in the data dir, log where wallet files are on the volume.
 # 3. Render a fresh native-mode user-settings.yml from the template.
 # 4. Check that the daemon's config loader accepts it.
 # 5. exec rocketpoold.
@@ -68,6 +69,10 @@ log "Network $NETWORK, execution client $EXECUTIONCLIENT ($EC_HTTP_URL), consens
 mkdir -p "$DATA_DIR" || stop_with backup_failed "Could not create $DATA_DIR."
 if ! backup_if_needed; then
     stop_with backup_failed "Backing up the wallet and keys before the upgrade failed (disk full?). Nothing was changed. Free up space and restart the package."
+fi
+if [ ! -e "$DATA_DIR/wallet" ]; then
+    # e.g. the wallet is still in an automatic backup after an upgrade: say where
+    log_found_wallets
 fi
 
 if ! render_settings "$SETTINGS_FILE" "$DATA_DIR" "$EC_HTTP_URL" "$CC_HTTP_URL" "8280"; then
