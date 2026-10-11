@@ -379,6 +379,24 @@ assert_eq "$(wc -l <"$SB/found.log" | tr -d ' ')" "2" "(depth 7 is not searched)
 assert_not_contains "$SB/found.log" "crypto"
 assert_not_contains "$SB/found.log" "none found"
 
+t "found wallets: paths with spaces are logged whole, control characters as '?', skipped folders are not searched"
+new_sandbox foundodd
+rm -f "$DATA_DIR/wallet"
+mkdir -p "$BACKUP_ROOT/legacy x" "$SB/bad
+name" "$BACKUP_ROOT/.partial-1" "$BACKUP_ROOT/mnemonic-archive-1" "$SB/rewards-trees/x" "$SB/node_modules"
+for d in "$BACKUP_ROOT/legacy x" "$SB/bad
+name" "$BACKUP_ROOT/.partial-1" "$BACKUP_ROOT/mnemonic-archive-1" "$SB/rewards-trees/x" "$SB/node_modules"; do
+    printf '{"crypto":"w"}' >"$d/wallet"
+done
+lib 'log_found_wallets' >"$SB/found.log"
+assert_contains "$SB/found.log" "A wallet file exists at $BACKUP_ROOT/legacy x/wallet (the app offers to use it)."
+assert_contains "$SB/found.log" "A wallet file exists at $SB/bad?name/wallet (the app offers to use it)."
+assert_eq "$(wc -l <"$SB/found.log" | tr -d ' ')" "2" "(one line per offered wallet, nothing from skipped folders)"
+assert_not_contains "$SB/found.log" ".partial-"
+assert_not_contains "$SB/found.log" "mnemonic-archive-"
+assert_not_contains "$SB/found.log" "rewards-trees"
+assert_not_contains "$SB/found.log" "node_modules"
+
 t "found wallets: none anywhere"
 new_sandbox foundnone
 rm -f "$DATA_DIR/wallet"
