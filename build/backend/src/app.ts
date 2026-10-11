@@ -110,6 +110,7 @@ export function createApp(config: Config, logger: Logger): RequestListener {
             supervisorSocket: config.supervisorSocket,
             daemonProgram: config.daemonProgram,
             reconcileTriggerFile: config.reconcileTriggerFile,
+            log: (msg) => logger.info(`wallet adopt: ${msg}`),
           },
           body,
         );

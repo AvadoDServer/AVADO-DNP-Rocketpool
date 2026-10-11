@@ -121,7 +121,16 @@ export async function restartProcess(
   startTimeoutMs = RESTART_START_TIMEOUT_MS,
 ): Promise<{ ok: boolean; error?: string }> {
   await rpc(socketPath, "supervisor.stopProcess", [program, true], stopDeadlineMs);
-  const start = await rpc(socketPath, "supervisor.startProcess", [program, false], startTimeoutMs);
+  return startProcess(socketPath, program, startTimeoutMs);
+}
+
+/** startProcess(program, wait=false); ALREADY_STARTED counts as success. Never throws. */
+export async function startProcess(
+  socketPath: string,
+  program: string,
+  timeoutMs = RESTART_START_TIMEOUT_MS,
+): Promise<{ ok: boolean; error?: string }> {
+  const start = await rpc(socketPath, "supervisor.startProcess", [program, false], timeoutMs);
   if (!start.ok && !start.fault?.includes("ALREADY_STARTED")) return { ok: false, error: `starting ${program}: ${start.error}` };
   return { ok: true };
 }

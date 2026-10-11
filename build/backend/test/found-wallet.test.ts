@@ -736,7 +736,7 @@ test("adopt: restarts the daemon, then asks for the key check, and again later",
       if (m === "supervisor.startProcess") triggerAtStart = existsSync(opts.reconcileTriggerFile);
     },
   );
-  const scheduled: { fn: () => void; ms: number }[] = [];
+  const scheduled: { fn: () => Promise<void>; ms: number }[] = [];
   try {
     await makeWallet(path.join(vol, "backups", "legacy-x"));
     const r = await adoptFoundWallet(
@@ -759,13 +759,77 @@ test("adopt: restarts the daemon, then asks for the key check, and again later",
     // the loop picks the file up (deletes it); each later timer writes it again
     for (const s of scheduled) {
       await rm(opts.reconcileTriggerFile);
-      s.fn();
+      await s.fn();
       for (let i = 0; i < 50 && !(await exists(opts.reconcileTriggerFile)); i++) await new Promise((r) => setTimeout(r, 10));
       assert.ok(await exists(opts.reconcileTriggerFile), `rewritten after ${s.ms} ms`);
     }
   } finally {
     await closeServer(server);
   }
+});
+
+test("adopt: the later checks start the daemon when it is down, and leave it alone when it runs", async () => {
+  const sock = path.join(root, "s.sock");
+  let state = "RUNNING";
+  const info = () =>
+    `<?xml version="1.0"?><methodResponse><params><param><value><struct>` +
+    `<member><name>statename</name><value><string>${state}</string></value></member>` +
+    `</struct></value></param></params></methodResponse>`;
+  const { server, calls } = await fakeSupervisor(sock, (m) => (m === "supervisor.getProcessInfo" ? info() : OK));
+  const scheduled: { fn: () => Promise<void>; ms: number }[] = [];
+  const logs: string[] = [];
+  try {
+    await makeWallet(path.join(vol, "backups", "legacy-x"));
+    await adoptFoundWallet(
+      { ...opts, supervisorSocket: sock, schedule: (fn, ms) => scheduled.push({ fn, ms }), log: (m) => logs.push(m) },
+      { dir: "backups/legacy-x" },
+    );
+    const methods = () => calls.map((c) => c.split(" ")[0]);
+    assert.deepEqual(methods(), ["supervisor.stopProcess", "supervisor.startProcess"]);
+
+    for (const down of ["STOPPED", "EXITED", "FATAL"]) {
+      // +45 s tick: the start of the restart got lost, the daemon is down
+      calls.length = 0;
+      logs.length = 0;
+      state = down;
+      await rm(opts.reconcileTriggerFile, { force: true });
+      await scheduled[0]!.fn();
+      assert.deepEqual(methods(), ["supervisor.getProcessInfo", "supervisor.startProcess"], down);
+      assert.equal(calls[1], "supervisor.startProcess rocketpool-node 0", "start without waiting");
+      assert.ok(await exists(opts.reconcileTriggerFile), "then the key check is asked to run");
+      assert.deepEqual(logs, [
+        `45s after putting the wallet back: the daemon was ${down}, started it`,
+        "45s after putting the wallet back: asked the key check to run",
+      ]);
+    }
+
+    for (const up of ["RUNNING", "STARTING"]) {
+      calls.length = 0;
+      logs.length = 0;
+      state = up;
+      await rm(opts.reconcileTriggerFile, { force: true });
+      await scheduled[1]!.fn();
+      assert.deepEqual(methods(), ["supervisor.getProcessInfo"], `${up}: no start`);
+      assert.ok(await exists(opts.reconcileTriggerFile));
+      assert.deepEqual(logs, [
+        `120s after putting the wallet back: the daemon is ${up}`,
+        "120s after putting the wallet back: asked the key check to run",
+      ]);
+    }
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("adopt: the later check without supervisord sends no start, still writes the trigger, never throws", async () => {
+  const scheduled: { fn: () => Promise<void>; ms: number }[] = [];
+  const logs: string[] = [];
+  await makeWallet(path.join(vol, "backups", "legacy-x"));
+  await adoptFoundWallet({ ...opts, schedule: (fn, ms) => scheduled.push({ fn, ms }), log: (m) => logs.push(m) }, { dir: "backups/legacy-x" });
+  await rm(opts.reconcileTriggerFile);
+  await scheduled[0]!.fn();
+  assert.ok(await exists(opts.reconcileTriggerFile));
+  assert.match(logs[0]!, /^45s after putting the wallet back: the daemon is UNKNOWN \(supervisord not reachable/);
 });
 
 // ---------- HTTP: status + POST /api/avado/wallet/adopt ----------

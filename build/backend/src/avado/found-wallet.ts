@@ -5,7 +5,7 @@ import path from "node:path";
 import { sha256 } from "../backup";
 import { HttpError } from "../http-util";
 import { requestReconcileRun } from "../reconcile/api";
-import { restartProcess } from "./supervisor";
+import { getProcessState, restartProcess, startProcess } from "./supervisor";
 
 /**
  * A Rocket Pool wallet found on the package volume outside the data dir: in an
@@ -260,8 +260,10 @@ export interface AdoptOptions {
   now?: Date;
   /** Wall-clock limit for stopping the daemon (default RESTART_STOP_DEADLINE_MS, 70 s). */
   restartStopDeadlineMs?: number;
-  /** Runs the later trigger writes; default: an unref'd setTimeout. */
-  schedule?: (fn: () => void, ms: number) => void;
+  /** Runs the later checks (ADOPT_TRIGGER_RETRY_MS); default: an unref'd setTimeout. */
+  schedule?: (fn: () => Promise<void>, ms: number) => void;
+  /** Where the later checks report what they did. */
+  log?: (msg: string) => void;
   /** Tests only: called after each file or folder this call creates. */
   onCreated?: (p: string) => void | Promise<void>;
 }
@@ -409,6 +411,36 @@ function plainReason(err: unknown): string {
   }
 }
 
+/** Supervisord states in which the daemon is down and nothing will start it again. */
+const DAEMON_DOWN_STATES = new Set(["STOPPED", "EXITED", "FATAL"]);
+
+/**
+ * Runs ADOPT_TRIGGER_RETRY_MS after adopting: if the daemon is down (the restart's start
+ * can be lost when the stop took longer than its deadline), starts it, then asks the key
+ * check to run again. Never throws.
+ */
+async function laterCheck(opts: AdoptOptions, ms: number, trigger: () => Promise<unknown>): Promise<void> {
+  const log = opts.log ?? (() => undefined);
+  const after = `${Math.round(ms / 1000)}s after putting the wallet back`;
+  try {
+    const st = await getProcessState(opts.supervisorSocket, opts.daemonProgram);
+    if (DAEMON_DOWN_STATES.has(st.state)) {
+      const r = await startProcess(opts.supervisorSocket, opts.daemonProgram);
+      log(
+        r.ok
+          ? `${after}: the daemon was ${st.state}, started it`
+          : `${after}: the daemon was ${st.state}, starting it failed: ${r.error ?? "unknown"}`,
+      );
+    } else {
+      log(`${after}: the daemon is ${st.state}${st.error ? ` (${st.error})` : ""}`);
+    }
+  } catch (err) {
+    log(`${after}: checking the daemon failed: ${String((err as Error)?.message ?? err)}`);
+  }
+  await trigger();
+  log(`${after}: asked the key check to run`);
+}
+
 /** One adopt at a time per process (a double click, a second tab). */
 let adoptInFlight = false;
 
@@ -482,8 +514,9 @@ async function adopt(opts: AdoptOptions, want: string): Promise<AdoptResult> {
   // when the daemon is up (the loop deletes the file each time it picks it up)
   const trigger = () => requestReconcileRun(opts).catch(() => undefined);
   await trigger();
-  const schedule = opts.schedule ?? ((fn: () => void, ms: number) => void setTimeout(fn, ms).unref());
-  for (const ms of ADOPT_TRIGGER_RETRY_MS) schedule(() => void trigger(), ms);
+  const schedule =
+    opts.schedule ?? ((fn: () => Promise<void>, ms: number) => void setTimeout(() => void fn(), ms).unref());
+  for (const ms of ADOPT_TRIGGER_RETRY_MS) schedule(() => laterCheck(opts, ms, trigger), ms);
 
   return { dir: match.dir, copied, restarted, ...(restartError !== undefined ? { restartError } : {}) };
 }
