@@ -20,7 +20,7 @@ ARG CLIENT_UI_SOURCE=git
 ########## Rocket Pool UI (https://github.com/AvadoDServer/AVADO-Client-UI)
 # Static files only, so this stage runs on the build host's platform.
 FROM ${NODE_SLIM_IMAGE} AS ui-git
-ARG CLIENT_UI_VERSION=v0.2.1
+ARG CLIENT_UI_VERSION=v0.3.1
 ARG CLIENT_UI_REPO=https://github.com/AvadoDServer/AVADO-Client-UI
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates \

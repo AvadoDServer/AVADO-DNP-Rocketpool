@@ -1,6 +1,6 @@
 {
   "name": "rocketpool.avado.dnp.dappnode.eth",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "upstream": "v1.24.2",
   "title": "Rocket Pool",
   "description": "Rocket Pool is decentralised Ethereum staking protocol",
