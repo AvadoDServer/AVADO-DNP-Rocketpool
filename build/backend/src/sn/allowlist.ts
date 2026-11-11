@@ -19,7 +19,7 @@
  *   - the odao, pdao, auction, security, debug and upgrade groups (governance is out of scope)
  *   - write routes the AVADO UI never calls (their read routes stay): node/send, node/send-all
  *     and node/sign-message (hot-wallet drain / arbitrary signing), node/set-rpl-withdrawal-address,
- *     megapool stake, reduce-bond and dissolve-validator, minipool refund and rescue-dissolved,
+ *     megapool stake, reduce-bond and dissolve-validator, minipool rescue-dissolved,
  *     minipool/delegate-upgrade and the megapool/minipool set-use-latest-delegate setters,
  *     node/set-timezone, node/confirm-primary-withdrawal-address,
  *     node/confirm-rpl-withdrawal-address, node/initialize-fee-distributor,
@@ -169,6 +169,10 @@ export const ALLOWED_ROUTES: Readonly<Record<string, RouteSpec>> = Object.freeze
   "minipool/get-minipool-close-details-for-node": R,
   "minipool/close": W,
   "minipool/can-refund": R,
+  // Pays only the refund waiting in a minipool (the node's share of a payout someone
+  // else started) to the withdrawal address: the UI's Claim refund (Client UI v0.5.1),
+  // for when distribute-balance (which pays the refund too) isn't possible.
+  "minipool/refund": W,
   "minipool/get-delegate": R,
   "minipool/get-effective-delegate": R,
   "minipool/get-previous-delegate": R,

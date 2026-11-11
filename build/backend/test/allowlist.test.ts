@@ -24,7 +24,6 @@ test("unknown and deliberately excluded routes are 404 and never reach Smartnode
     "/api/sn/megapool/reduce-bond",
     "/api/sn/megapool/dissolve-validator",
     "/api/sn/megapool/set-use-latest-delegate",
-    "/api/sn/minipool/refund",
     "/api/sn/minipool/delegate-upgrade",
     "/api/sn/minipool/set-use-latest-delegate",
     "/api/sn/minipool/rescue-dissolved",
@@ -145,13 +144,27 @@ test("every allow-listed write route is one the UI sends", () => {
   const writes = Object.entries(ALLOWED_ROUTES).filter(([, v]) => v.kind === "W").map(([k]) => k).sort();
   assert.deepEqual(writes, [
     "megapool/claim-refund", "megapool/delegate-upgrade", "megapool/distribute", "megapool/exit-queue", "megapool/exit-validator", "megapool/repay-debt",
-    "minipool/close", "minipool/distribute-balance", "minipool/exit",
+    "minipool/close", "minipool/distribute-balance", "minipool/exit", "minipool/refund",
     "node/claim-and-stake-rewards", "node/claim-rewards", "node/claim-unclaimed-rewards", "node/deposit", "node/distribute",
     "node/provision-express-tickets", "node/register", "node/set-primary-withdrawal-address", "node/set-smoothing-pool-status",
     "node/stake-rpl", "node/stake-rpl-approve-rpl", "node/unstake-legacy-rpl", "node/unstake-rpl",
     "node/withdraw-credit", "node/withdraw-eth", "node/withdraw-rpl",
     "wallet/export", "wallet/init", "wallet/recover", "wallet/search-and-recover", "wallet/set-password",
   ]);
+});
+
+test("minipool refund: its read and write routes are allowed (the UI's Claim refund), the write forwarded as POST with the address", async () => {
+  assert.deepEqual(ALLOWED_ROUTES["minipool/can-refund"], { kind: "R" });
+  assert.deepEqual(ALLOWED_ROUTES["minipool/refund"], { kind: "W" });
+  h.setUpstream(() => ({ status: 200, body: '{"status":"success","error":"","txHash":"0x' + "ab".repeat(32) + '"}' }));
+  h.calls.length = 0;
+  assert.equal((await h.request("GET", "/api/sn/minipool/refund")).status, 405);
+  const r = await h.post("/api/sn/minipool/refund", { address: "0x1111111111111111111111111111111111111111", gasLimit: "87000" });
+  assert.equal(r.status, 200);
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0]!.method, "POST");
+  assert.equal(h.calls[0]!.path, "/api/minipool/refund");
+  assert.equal(h.calls[0]!.body, "address=0x1111111111111111111111111111111111111111&gasLimit=87000");
 });
 
 test("megapool delegate upgrade: its read and write routes are allowed (the UI offers it)", () => {
@@ -162,7 +175,7 @@ test("megapool delegate upgrade: its read and write routes are allowed (the UI o
 });
 
 test("the read routes of removed writes stay available", () => {
-  for (const r of ["node/can-send", "megapool/can-stake", "megapool/can-reduce-bond", "megapool/can-dissolve-validator", "minipool/can-refund", "node/can-set-rpl-withdrawal-address"]) {
+  for (const r of ["node/can-send", "megapool/can-stake", "megapool/can-reduce-bond", "megapool/can-dissolve-validator", "node/can-set-rpl-withdrawal-address"]) {
     assert.deepEqual(ALLOWED_ROUTES[r], { kind: "R" }, r);
   }
 });
